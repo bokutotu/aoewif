@@ -348,39 +348,9 @@ data IrError
     | InvalidScalarResult
     | OutputRequired
     | OutputAlreadyMarked Int
-    deriving stock (Eq)
+    deriving stock (Eq, Show)
 
 instance Exception IrError
-
-instance Show IrError where
-    show (InvalidIdentifier value) = "invalid identifier `" <> value <> "`"
-    show (DuplicateName value) = "duplicate name `" <> value <> "`"
-    show (ForeignId kind) = "foreign " <> kind <> " ID"
-    show (UnknownTensor identifierIndex) = "unknown tensor value " <> show identifierIndex
-    show (UnknownIterator identifierIndex) = "unknown iterator " <> show identifierIndex
-    show (UnknownScalar identifierIndex) = "unknown scalar value " <> show identifierIndex
-    show (TensorRankMismatch expected actual) =
-        "tensor rank mismatch: expected " <> show expected <> ", got " <> show actual
-    show (TensorElementTypeUnsupported scalarType) =
-        "unsupported tensor element type " <> show scalarType
-    show DimensionMismatch = "iterator extent does not match tensor dimension"
-    show ConstantIndexRequiresStaticDimension =
-        "constant indices require a static tensor dimension"
-    show (ConstantIndexOutOfBounds indexValue extent) =
-        "constant index " <> show indexValue <> " is outside extent " <> show extent
-    show ReductionInitRequired = "reduction requires an initial value"
-    show ReductionInitWithoutReduction = "initial value is only valid for a reduction"
-    show ReductionAccumulatorRequired = "reduction body requires an accumulator argument"
-    show AccumulatorWithoutReduction = "accumulator is only valid for a reduction"
-    show DuplicateAccumulator = "reduction already has an accumulator"
-    show (ScalarTypeMismatch expected actual) =
-        "scalar type mismatch: expected " <> show expected <> ", got " <> show actual
-    show ScalarOperandsMustMatch = "scalar operand types must match"
-    show ScalarResultMustMatchInit = "reduction result type must match its initial value"
-    show InvalidScalarResult = "invalid scalar region result"
-    show OutputRequired = "compute function requires at least one output"
-    show (OutputAlreadyMarked identifierIndex) =
-        "tensor value " <> show identifierIndex <> " is already marked as an output"
 
 data FunctionState = FunctionState
     { stateFunction     :: ComputeFunction

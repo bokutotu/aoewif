@@ -1,4 +1,3 @@
-target
 dist-newstyle
 .direnv
 /.pre-commit-config.yaml
