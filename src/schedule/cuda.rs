@@ -40,9 +40,9 @@ impl CudaDim3 {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CudaTarget {
-    max_threads_per_block: u64,
-    max_block_dimensions: CudaDim3,
-    max_grid_dimensions: CudaDim3,
+    threads_per_block: u64,
+    block_dimensions: CudaDim3,
+    grid_dimensions: CudaDim3,
 }
 
 impl CudaTarget {
@@ -52,23 +52,23 @@ impl CudaTarget {
         max_grid_dimensions: CudaDim3,
     ) -> Self {
         Self {
-            max_threads_per_block,
-            max_block_dimensions,
-            max_grid_dimensions,
+            threads_per_block: max_threads_per_block,
+            block_dimensions: max_block_dimensions,
+            grid_dimensions: max_grid_dimensions,
         }
     }
 
     pub const fn max_threads_per_block(self) -> u64 {
-        self.max_threads_per_block
+        self.threads_per_block
     }
 
     pub const fn max_block_dimensions(self) -> CudaDim3 {
-        self.max_block_dimensions
+        self.block_dimensions
     }
 
     pub const fn max_grid_dimensions(self) -> CudaDim3 {
-        self.max_grid_dimensions
-    }
+        self.grid_dimensions
+}
 }
 
 impl Default for CudaTarget {

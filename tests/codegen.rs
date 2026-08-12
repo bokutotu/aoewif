@@ -1,3 +1,5 @@
+#![allow(clippy::needless_raw_string_hashes)]
+
 use aoewif::{
     CodegenError, ComparePredicate, ComputeFunctionBuilder, ComputeOpId, CpuSchedule, CudaBinding,
     CudaSchedule, CudaTarget, Dim, IndexExpr, IteratorId, ScalarLiteral, TensorType,

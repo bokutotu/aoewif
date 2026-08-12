@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_lines)]
+
 use aoewif::{
     ComputeFunctionBuilder, ComputeOpId, CpuSchedule, CudaBinding, CudaDim3, CudaSchedule,
     CudaTarget, Dim, IndexExpr, IteratorId, IteratorKind, LoopExtent, LoopId, LoopIndexExpr,
@@ -300,7 +302,7 @@ fn cpu_reorder_changes_the_physical_loop_order() {
             .plan()
             .loops()
             .iter()
-            .map(|loop_axis| loop_axis.id())
+            .map(aoewif::LoopAxis::id)
             .collect::<Vec<_>>(),
         vec![second_loop, first_loop]
     );

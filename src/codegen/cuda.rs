@@ -182,7 +182,7 @@ fn emit_scalar_body(
         let name = scalar_name(operation.result());
         source.line(format!(
             "{} {name} = {expression};",
-            scalar_type_name(operation.result_type())?
+            scalar_type_name(operation.result_type())
         ));
         values.insert(operation.result(), name);
     }

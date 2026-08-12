@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_lines)]
+
 use aoewif::{
     ComparePredicate, ComputeFunctionBuilder, Dim, IndexExpr, IrError, IteratorKind,
     ReductionPolicy, ScalarArgumentKind, ScalarLiteral, ScalarOperationKind, ScalarType,
@@ -474,7 +476,7 @@ fn builds_batched_gemm() {
         operation
             .iterators()
             .iter()
-            .map(|iterator| iterator.kind())
+            .map(aoewif::Iterator::kind)
             .collect::<Vec<_>>(),
         vec![
             IteratorKind::Parallel,
@@ -643,7 +645,7 @@ fn chains_compute_results_through_tensor_ssa() {
     assert_eq!(
         function
             .input_tensors()
-            .map(|tensor| tensor.id())
+            .map(aoewif::TensorValue::id)
             .collect::<Vec<_>>(),
         vec![input]
     );

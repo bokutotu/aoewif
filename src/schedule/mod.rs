@@ -72,7 +72,7 @@ impl LoopExtent {
                 )?;
                 Ok(Self::CeilDiv { dividend, divisor })
             }
-            dividend => Ok(Self::CeilDiv {
+            dividend @ Self::Symbol(_) => Ok(Self::CeilDiv {
                 dividend: Box::new(dividend),
                 divisor,
             }),
@@ -649,5 +649,5 @@ fn has_parallel_inside_reduction(loops: &[LoopAxis]) -> bool {
 }
 
 fn ceil_div(value: u64, divisor: u64) -> u64 {
-    value / divisor + u64::from(value % divisor != 0)
+    value / divisor + u64::from(!value.is_multiple_of(divisor))
 }

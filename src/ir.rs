@@ -959,10 +959,10 @@ impl ComputeOpBuilder<'_> {
             (false, None, Some(_)) => return Err(IrError::AccumulatorWithoutReduction),
             _ => {}
         }
-        if let Some(init) = self.init {
-            if result_type != init.scalar_type() {
-                return Err(IrError::ScalarResultMustMatchInit);
-            }
+        if let Some(init) = self.init
+            && result_type != init.scalar_type()
+        {
+            return Err(IrError::ScalarResultMustMatchInit);
         }
         if result_type != ScalarType::F32 {
             return Err(IrError::TensorElementTypeUnsupported {
@@ -1149,10 +1149,10 @@ fn verify_function(function: &ComputeFunction) -> Result<(), IrError> {
             return Err(IrError::ForeignId { kind: "tensor" });
         }
         for dim in &tensor.tensor_type.shape {
-            if let Dim::Symbol(symbol) = dim {
-                if symbol.owner != function.owner || function.symbols.get(symbol.index).is_none() {
-                    return Err(IrError::ForeignId { kind: "symbol" });
-                }
+            if let Dim::Symbol(symbol) = dim
+                && (symbol.owner != function.owner || function.symbols.get(symbol.index).is_none())
+            {
+                return Err(IrError::ForeignId { kind: "symbol" });
             }
         }
     }
@@ -1193,12 +1193,12 @@ fn verify_operation(function: &ComputeFunction, operation: &ComputeOp) -> Result
             });
         }
         for index in &access.indices {
-            if let IndexExpr::Iterator(iterator) = index {
-                if !iterator_ids.contains(iterator) {
-                    return Err(IrError::UnknownIterator {
-                        index: iterator.index,
-                    });
-                }
+            if let IndexExpr::Iterator(iterator) = index
+                && !iterator_ids.contains(iterator)
+            {
+                return Err(IrError::UnknownIterator {
+                    index: iterator.index,
+                });
             }
         }
     }
@@ -1232,16 +1232,15 @@ fn verify_operation(function: &ComputeFunction, operation: &ComputeOp) -> Result
     match (has_reduction, operation.init, accumulator_count) {
         (true, None, _) => return Err(IrError::ReductionInitRequired),
         (true, Some(_), 0) => return Err(IrError::ReductionAccumulatorRequired),
-        (true, Some(_), 1) => {}
+        (true, Some(_), 1) | (false, None, 0) => {}
         (true, Some(_), _) => return Err(IrError::DuplicateAccumulator),
         (false, Some(_), _) => return Err(IrError::ReductionInitWithoutReduction),
-        (false, None, 0) => {}
         (false, None, _) => return Err(IrError::AccumulatorWithoutReduction),
     }
-    if let Some(init) = operation.init {
-        if init.scalar_type() != result_type {
-            return Err(IrError::ScalarResultMustMatchInit);
-        }
+    if let Some(init) = operation.init
+        && init.scalar_type() != result_type
+    {
+        return Err(IrError::ScalarResultMustMatchInit);
     }
     let result_tensor = function
         .tensor(operation.result)

@@ -154,11 +154,11 @@ pub(super) fn scalar_name(value: ScalarValueId) -> String {
     format!("scalar{}", value.index())
 }
 
-pub(super) fn scalar_type_name(scalar_type: ScalarType) -> Result<&'static str, CodegenError> {
+pub(super) const fn scalar_type_name(scalar_type: ScalarType) -> &'static str {
     match scalar_type {
-        ScalarType::F32 => Ok("float"),
-        ScalarType::Bool => Ok("bool"),
-        ScalarType::Index => Ok("size_t"),
+        ScalarType::F32 => "float",
+        ScalarType::Bool => "bool",
+        ScalarType::Index => "size_t",
     }
 }
 
