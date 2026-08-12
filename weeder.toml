@@ -1,0 +1,3 @@
+roots = ["^Main.main$"]
+root-modules = ["^Aoewif$"]
+type-class-roots = true
