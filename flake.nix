@@ -90,9 +90,9 @@
           default = pkgs.mkShellNoCC {
             packages = [
               ghc
-              pkgs.haskellPackages.cabal-gild
               pkgs.cabal-install
               pkgs.fourmolu
+              pkgs.haskellPackages.hpack
               haskellPackages.haskell-language-server
               pkgs.stylish-haskell
               hls

@@ -6,10 +6,14 @@ The library depends only on `base`. Its test suite uses Hspec.
 
 ```console
 direnv allow
+hpack
 cabal build all
 cabal test all
 ```
 
-The Nix development shell uses GHC 9.14.1 and includes Cabal, Haskell Language
-Server (`haskell-language-server` and `hls`), Fourmolu, Stylish Haskell, and
-`cabal-gild`.
+Package metadata is maintained in `package.yaml`. Hpack generates the ignored
+`aoewif.cabal` file locally.
+
+The Nix development shell uses GHC 9.14.1 and includes Cabal, Hpack, Haskell
+Language Server (`haskell-language-server` and `hls`), Fourmolu, and Stylish
+Haskell.
