@@ -91,6 +91,7 @@
             packages = [
               ghc
               pkgs.cabal-install
+              pkgs.haskellPackages.fast-tags
               pkgs.fourmolu
               pkgs.haskellPackages.hpack
               haskellPackages.haskell-language-server
