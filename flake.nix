@@ -12,8 +12,37 @@
         "x86_64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
+      mkPackage =
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          haskellPackages = pkgs.haskell.packages.ghc9141;
+        in
+        haskellPackages.callCabal2nixWithOptions "aoewif" ./. "--hpack" {
+          hpack = pkgs.haskellPackages.hpack;
+        };
     in
     {
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          default = pkgs.haskell.lib.dontCheck (mkPackage system);
+        }
+      );
+
+      checks = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          aoewif-test = pkgs.haskell.lib.doCheck (mkPackage system);
+        }
+      );
+
       devShells = forAllSystems (
         system:
         let
