@@ -1,5 +1,5 @@
 {
-  description = "aoewif Rust development environment";
+  description = "aoewif Haskell development environment";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -9,7 +9,6 @@
       systems = [
         "aarch64-darwin"
         "aarch64-linux"
-        "x86_64-darwin"
         "x86_64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
@@ -19,15 +18,84 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          hlib = pkgs.haskell.lib;
+          disableFlags =
+            flags: package: builtins.foldl' (result: flag: hlib.disableCabalFlag result flag) package flags;
+          haskellPackages = pkgs.haskell.packages.ghc9141.override {
+            overrides = self: super: {
+              algebraic-graphs = super.algebraic-graphs_0_8;
+              constraints-extras = hlib.doJailbreak super.constraints-extras;
+              dependent-map = hlib.doJailbreak super.dependent-map;
+              enummapset = hlib.dontCheck super.enummapset;
+              generic-lens = hlib.dontCheck super.generic-lens;
+              ghcide = hlib.doJailbreak super.ghcide;
+              ghc-trace-events = hlib.doJailbreak super.ghc-trace-events;
+              hiedb = hlib.dontCheck (hlib.doJailbreak super.hiedb);
+              hie-compat = hlib.doJailbreak super.hie-compat;
+              lucid = hlib.doJailbreak super.lucid;
+              lsp = hlib.doJailbreak super.lsp;
+              lsp-test = hlib.doJailbreak super.lsp-test;
+              lsp-types = hlib.doJailbreak super.lsp-types;
+              rebase = hlib.doJailbreak super.rebase;
+              regex-tdfa = hlib.dontCheck super.regex-tdfa;
+              string-interpolate = hlib.doJailbreak super.string-interpolate;
+              tasty-hspec = hlib.doJailbreak super.tasty-hspec;
+              haskell-language-server =
+                hlib.overrideCabal
+                  (disableFlags
+                    [
+                      "cabal"
+                      "cabalfmt"
+                      "cabalgild"
+                      "floskell"
+                      "fourmolu"
+                      "ghc-lib"
+                      "hlint"
+                      "ormolu"
+                      "retrie"
+                      "splice"
+                      "stan"
+                      "stylishHaskell"
+                    ]
+                    (
+                      super.haskell-language-server.overrideScope (
+                        _: _: {
+                          Cabal = null;
+                          Cabal-syntax = null;
+                          apply-refact = null;
+                          cabal-add = null;
+                          eventlog2html = null;
+                          fourmolu = null;
+                          hlint = null;
+                          ormolu = null;
+                          refact = null;
+                          shake-bench = null;
+                          stan = null;
+                          stylish-haskell = null;
+                        }
+                      )
+                    )
+                  )
+                  (_: {
+                    buildDepends = [ ];
+                  });
+            };
+          };
+          ghc = haskellPackages.ghcWithPackages (haskellPkgs: [ haskellPkgs.hspec ]);
+          hls = pkgs.writeShellScriptBin "hls" ''
+            exec ${haskellPackages.haskell-language-server}/bin/haskell-language-server-wrapper "$@"
+          '';
         in
         {
-          default = pkgs.mkShell {
-            packages = with pkgs; [
-              cargo
-              clippy
-              rust-analyzer
-              rustc
-              rustfmt
+          default = pkgs.mkShellNoCC {
+            packages = [
+              ghc
+              pkgs.haskellPackages.cabal-gild
+              pkgs.cabal-install
+              pkgs.fourmolu
+              haskellPackages.haskell-language-server
+              pkgs.stylish-haskell
+              hls
             ];
           };
         }
