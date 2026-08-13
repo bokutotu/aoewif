@@ -4,8 +4,10 @@
 module ComputeSpec (spec) where
 
 import           Aoewif.Compute
-import           Data.Functor   (void)
-import           Prelude        hiding (compare, exp, log, maximum, minimum)
+import           Data.Functor         (void)
+import           GHC.OverloadedLabels (fromLabel)
+import           Prelude              hiding (compare, exp, log, maximum,
+                                       minimum)
 import           Test.Hspec
 
 newtype VectorAxis scope = VectorAxis (Axis scope Spatial)
@@ -116,12 +118,17 @@ spec = describe "compute eDSL" $ do
             )
             `shouldBe` Left DimensionMismatch
 
-    it "rejects marking the same output twice" $ do
+    it "rejects an invalid generated-function identifier at the input boundary" $ do
         void
-            ( program #duplicate_output $ do
-                output <- compute #output (staticDim 1) $ \element ->
-                    (VectorAxis element, f32 0)
-                _ <- entry output
+            ( program (fromLabel @"invalid-name") $ do
+                let size = staticDim 1
+                output <- compute #output size $ \element ->
+                    ( VectorAxis element
+                    , select
+                        (compare Equal (index element) (indexLiteral 0))
+                        (f32 0)
+                        (f32 0)
+                    )
                 entry output
             )
-            `shouldBe` Left (OutputAlreadyMarked 0)
+            `shouldBe` Left (InvalidFunctionIdentifier "invalid-name")

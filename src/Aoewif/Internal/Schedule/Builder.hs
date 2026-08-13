@@ -16,14 +16,12 @@ module Aoewif.Internal.Schedule.Builder (
     cuda,
     withCpuSchedule,
     withCudaSchedule,
-)
-where
+) where
 
 import qualified Aoewif.Internal.Compute       as Compute
-import qualified Aoewif.Internal.IR            as IR
-import qualified Aoewif.Internal.Schedule.Base as Base
 import qualified Aoewif.Internal.Schedule.Cpu  as Cpu
 import qualified Aoewif.Internal.Schedule.Cuda as Cuda
+import qualified Aoewif.Internal.Schedule.IR   as IR
 import           Data.Word                     (Word64)
 
 data Cpu
@@ -34,19 +32,19 @@ newtype CpuSchedule = CpuSchedule Cpu.CpuSchedule
 
 newtype CudaSchedule = CudaSchedule Cuda.CudaSchedule
 
-newtype Loop scope = Loop Base.LoopId
+newtype Loop scope = Loop IR.LoopId
 
 type role Loop nominal
 
 newtype Schedule backend scope value = Schedule
-    { runSchedule :: ScheduleState backend -> Either Base.ScheduleError (value, ScheduleState backend)
+    { runSchedule :: ScheduleState backend -> Either IR.ScheduleError (value, ScheduleState backend)
     }
 
 type role Schedule nominal nominal representational
 
 data ScheduleState backend where
-    CpuState :: Base.LoopPlan -> Cpu.CpuSchedule -> ScheduleState Cpu
-    CudaState :: Base.LoopPlan -> Cuda.CudaSchedule -> ScheduleState Cuda
+    CpuState :: IR.LoopPlan -> Cpu.CpuSchedule -> ScheduleState Cpu
+    CudaState :: IR.LoopPlan -> Cuda.CudaSchedule -> ScheduleState Cuda
 
 instance Functor (Schedule backend scope) where
     fmap transform (Schedule action) = Schedule $ \state -> do
@@ -72,12 +70,11 @@ loop axis = Schedule $ \state -> case state of
 
 loopFromPlan ::
     Compute.Axis scope Compute.Spatial ->
-    Base.LoopPlan ->
+    IR.LoopPlan ->
     ScheduleState backend ->
-    Either Base.ScheduleError (Loop scope, ScheduleState backend)
-loopFromPlan axis initialPlan state = case Base.loopFor (Compute.axisIteratorId axis) initialPlan of
-    Just loopId -> Right (Loop loopId, state)
-    Nothing -> Left (Base.UnknownIterator (IR.iteratorIdIndex (Compute.axisIteratorId axis)))
+    Either IR.ScheduleError (Loop scope, ScheduleState backend)
+loopFromPlan axis initialPlan state =
+    Right (Loop (IR.loopFor (Compute.axisIndexId axis) initialPlan), state)
 
 split :: Loop scope -> Word64 -> Schedule backend scope (Loop scope, Loop scope)
 split (Loop loopId) factor = Schedule $ \state -> case state of
@@ -101,9 +98,9 @@ reorder loops = Schedule $ \state -> case state of
     unLoop (Loop loopId) = loopId
     completeOrder plan =
         loopIds
-            ++ map Base.loopAxisId (filter ((== IR.Reduction) . Base.loopKind) (Base.planLoops plan))
+            ++ map IR.loopAxisId (filter ((== IR.ReductionLoop) . IR.loopKind) (IR.planLoops plan))
 
-bind :: Loop scope -> Base.CudaBinding -> Schedule Cuda scope ()
+bind :: Loop scope -> IR.CudaBinding -> Schedule Cuda scope ()
 bind (Loop loopId) binding = Schedule $ \(CudaState initialPlan schedule) -> do
     nextSchedule <- Cuda.bindCudaSchedule loopId binding schedule
     pure ((), CudaState initialPlan nextSchedule)
@@ -111,9 +108,9 @@ bind (Loop loopId) binding = Schedule $ \(CudaState initialPlan schedule) -> do
 cpu ::
     Compute.Program axes ->
     (forall scope. axes scope -> Schedule Cpu scope ()) ->
-    Either Base.ScheduleError CpuSchedule
-cpu program build = Compute.withProgram program $ \function operationId axes -> do
-    initial <- Cpu.newCpuSchedule function operationId
+    Either IR.ScheduleError CpuSchedule
+cpu program build = Compute.withProgram program $ \computeProgram computation axes -> do
+    let initial = Cpu.newCpuSchedule computeProgram computation
     (_, final) <- executeCpu (build axes) initial
     pure (CpuSchedule final)
 
@@ -121,9 +118,9 @@ cuda ::
     Cuda.CudaTarget ->
     Compute.Program axes ->
     (forall scope. axes scope -> Schedule Cuda scope ()) ->
-    Either Base.ScheduleError CudaSchedule
-cuda target program build = Compute.withProgram program $ \function operationId axes -> do
-    initial <- Cuda.newCudaSchedule function operationId target
+    Either IR.ScheduleError CudaSchedule
+cuda target program build = Compute.withProgram program $ \computeProgram computation axes -> do
+    initial <- Cuda.newCudaSchedule computeProgram computation target
     (_, final) <- executeCuda (build axes) initial
     pure (CudaSchedule final)
 
@@ -136,7 +133,7 @@ withCudaSchedule (CudaSchedule schedule) consume = consume schedule
 executeCpu ::
     Schedule Cpu scope value ->
     Cpu.CpuSchedule ->
-    Either Base.ScheduleError (value, Cpu.CpuSchedule)
+    Either IR.ScheduleError (value, Cpu.CpuSchedule)
 executeCpu action initial = do
     (value, finalState) <- runSchedule action (CpuState (Cpu.cpuSchedulePlan initial) initial)
     case finalState of
@@ -145,7 +142,7 @@ executeCpu action initial = do
 executeCuda ::
     Schedule Cuda scope value ->
     Cuda.CudaSchedule ->
-    Either Base.ScheduleError (value, Cuda.CudaSchedule)
+    Either IR.ScheduleError (value, Cuda.CudaSchedule)
 executeCuda action initial = do
     (value, finalState) <- runSchedule action (CudaState (Cuda.cudaSchedulePlan initial) initial)
     case finalState of

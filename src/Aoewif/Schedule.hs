@@ -26,8 +26,6 @@ module Aoewif.Schedule (
     cuda,
 ) where
 
-import           Aoewif.Internal.Schedule.Base    (CudaBinding (..),
-                                                   ScheduleError (..))
 import           Aoewif.Internal.Schedule.Builder (Cpu, CpuSchedule, Cuda,
                                                    CudaSchedule, Loop, Schedule,
                                                    bind, cpu, cuda, loop,
@@ -39,3 +37,5 @@ import           Aoewif.Internal.Schedule.Cuda    (CudaDim3, CudaTarget,
                                                    cudaMaxThreadsPerBlock,
                                                    defaultCudaTarget,
                                                    newCudaDim3, newCudaTarget)
+import           Aoewif.Internal.Schedule.IR      (CudaBinding (..),
+                                                   ScheduleError (..))

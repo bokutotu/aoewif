@@ -13,37 +13,33 @@ module Aoewif.Internal.Schedule.Cuda (
     defaultCudaTarget,
     CudaSchedule,
     newCudaSchedule,
-    cudaScheduleFunction,
-    cudaScheduleOperation,
+    cudaScheduleProgram,
+    cudaScheduleCompute,
     cudaSchedulePlan,
     cudaScheduleTarget,
     splitCudaSchedule,
     reorderCudaSchedule,
     bindCudaSchedule,
-)
-where
+) where
 
-import           Aoewif.Internal.IR            (ComputeFunction, ComputeOp,
-                                                ComputeOpId)
-import           Aoewif.Internal.Schedule.Base (CudaBinding, CudaDimension (..),
-                                                LoopAxis, LoopId, LoopPlan,
-                                                ScheduleError (..),
-                                                bindLoopPlan, bindingDimension,
-                                                checkedMultiply, createLoopPlan,
-                                                isThreadBinding, lookupLoopAxis,
-                                                loopBinding, loopExtent,
-                                                loopIdIndex, loopName,
-                                                operationFor, planLoops,
-                                                reorderLoopPlan, splitLoopPlan,
-                                                staticLoopExtent)
-import           Data.Word                     (Word64)
+import qualified Aoewif.Internal.Compute.IR  as Compute
+import           Aoewif.Internal.Schedule.IR (CudaBinding, CudaDimension (..),
+                                              LoopAxis, LoopId, LoopPlan,
+                                              ScheduleError (..), bindLoopPlan,
+                                              bindingDimension, checkedMultiply,
+                                              createLoopPlan, isThreadBinding,
+                                              lookupLoopAxis, loopBinding,
+                                              loopExtent, loopIdIndex, loopName,
+                                              planLoops, reorderLoopPlan,
+                                              splitLoopPlan, staticLoopExtent)
+import           Data.Word                   (Word64)
 
 data CudaDim3 = CudaDim3
     { internalCudaDimX :: Word64
     , internalCudaDimY :: Word64
     , internalCudaDimZ :: Word64
     }
-    deriving (Eq, Show)
+    deriving stock (Eq, Show)
 
 newCudaDim3 :: Word64 -> Word64 -> Word64 -> CudaDim3
 newCudaDim3 = CudaDim3
@@ -68,7 +64,7 @@ data CudaTarget = CudaTarget
     , internalCudaMaxBlockDimensions :: CudaDim3
     , internalCudaMaxGridDimensions  :: CudaDim3
     }
-    deriving (Eq, Show)
+    deriving stock (Eq, Show)
 
 newCudaTarget :: Word64 -> CudaDim3 -> CudaDim3 -> CudaTarget
 newCudaTarget = CudaTarget
@@ -86,36 +82,35 @@ defaultCudaTarget :: CudaTarget
 defaultCudaTarget = newCudaTarget 1024 (newCudaDim3 1024 1024 64) (newCudaDim3 2147483647 65535 65535)
 
 data CudaSchedule = CudaSchedule
-    { internalCudaScheduleFunction  :: ComputeFunction
-    , internalCudaScheduleOperation :: ComputeOp
-    , internalCudaSchedulePlan      :: LoopPlan
-    , internalCudaScheduleTarget    :: CudaTarget
+    { internalCudaScheduleProgram :: Compute.Program
+    , internalCudaScheduleCompute :: Compute.Compute
+    , internalCudaSchedulePlan    :: LoopPlan
+    , internalCudaScheduleTarget  :: CudaTarget
     }
-    deriving (Eq, Show)
+    deriving stock (Eq, Show)
 
-cudaScheduleFunction :: CudaSchedule -> ComputeFunction
-cudaScheduleFunction = internalCudaScheduleFunction
+newCudaSchedule :: Compute.Program -> Compute.Compute -> CudaTarget -> Either ScheduleError CudaSchedule
+newCudaSchedule program computation target = do
+    checkCudaTarget target
+    pure
+        CudaSchedule
+            { internalCudaScheduleProgram = program
+            , internalCudaScheduleCompute = computation
+            , internalCudaSchedulePlan = createLoopPlan computation
+            , internalCudaScheduleTarget = target
+            }
+
+cudaScheduleProgram :: CudaSchedule -> Compute.Program
+cudaScheduleProgram = internalCudaScheduleProgram
+
+cudaScheduleCompute :: CudaSchedule -> Compute.Compute
+cudaScheduleCompute = internalCudaScheduleCompute
 
 cudaSchedulePlan :: CudaSchedule -> LoopPlan
 cudaSchedulePlan = internalCudaSchedulePlan
 
 cudaScheduleTarget :: CudaSchedule -> CudaTarget
 cudaScheduleTarget = internalCudaScheduleTarget
-
-newCudaSchedule :: ComputeFunction -> ComputeOpId -> CudaTarget -> Either ScheduleError CudaSchedule
-newCudaSchedule function operationId target = do
-    checkCudaTarget target
-    operation <- operationFor function operationId
-    pure
-        CudaSchedule
-            { internalCudaScheduleFunction = function
-            , internalCudaScheduleOperation = operation
-            , internalCudaSchedulePlan = createLoopPlan operation
-            , internalCudaScheduleTarget = target
-            }
-
-cudaScheduleOperation :: CudaSchedule -> ComputeOp
-cudaScheduleOperation = internalCudaScheduleOperation
 
 splitCudaSchedule :: LoopId -> Word64 -> CudaSchedule -> Either ScheduleError (LoopId, LoopId, CudaSchedule)
 splitCudaSchedule loopId factor schedule = do

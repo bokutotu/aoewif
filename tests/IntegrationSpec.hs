@@ -30,13 +30,14 @@ spec = describe "compute to source integration" $ do
                 right <- input @F32 #right (reductionSize, columns)
                 output <- compute #output (rows, columns) $ \(row, column) ->
                     ( GemmAxes row column
-                    , foldOver reductionSize 0 $ \inner accumulator ->
-                        fma (left ! (row, inner)) (right ! (inner, column)) accumulator
+                    , named #dotProduct $
+                        foldOver reductionSize 0 $ \inner accumulator ->
+                            fma (left ! (row, inner)) (right ! (inner, column)) accumulator
                     )
                 entry output
         Right gemmProgram <- pure built
         Right gemmSchedule <- pure $ cpu gemmProgram (\_ -> pure ())
-        Right source <- pure $ generateC gemmSchedule
+        let source = generateC gemmSchedule
         (cSourceText source, cFunctionName source)
             `shouldBe` ( unlines
                             [ "#include <math.h>"
@@ -82,7 +83,7 @@ spec = describe "compute to source integration" $ do
             column <- loop matrixColumnAxis
             _ <- split column 4
             pure ()
-        Right source <- pure $ generateC chooseSchedule
+        let source = generateC chooseSchedule
         (cSourceText source, cFunctionName source)
             `shouldBe` ( unlines
                             [ "#include <math.h>"
@@ -125,7 +126,7 @@ spec = describe "compute to source integration" $ do
                 entry output
         Right scalarProgram <- pure built
         Right scalarSchedule <- pure $ cpu scalarProgram (\_ -> pure ())
-        Right source <- pure $ generateC scalarSchedule
+        let source = generateC scalarSchedule
         (cSourceText source, cFunctionName source)
             `shouldBe` ( unlines
                             [ "#include <math.h>"
@@ -183,7 +184,7 @@ spec = describe "compute to source integration" $ do
             bind blockX BlockX
             bind threadY ThreadY
             bind threadX ThreadX
-        Right source <- pure $ generateCuda addSchedule
+        let source = generateCuda addSchedule
         (cudaSourceText source, cudaKernelName source)
             `shouldBe` ( unlines
                             [ "#include <cuda_runtime.h>"

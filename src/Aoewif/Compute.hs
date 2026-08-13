@@ -12,7 +12,7 @@ module Aoewif.Compute (
     Tensor,
     Axis,
     Expr,
-    Kernel,
+    Computation,
     Entry,
     Program,
     ProgramM,
@@ -44,6 +44,7 @@ module Aoewif.Compute (
     compare,
     select,
     foldOver,
+    named,
 ) where
 
 import           Aoewif.Internal.Compute

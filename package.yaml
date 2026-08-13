@@ -25,13 +25,17 @@ library:
     - Aoewif.Compute
     - Aoewif.Schedule
   other-modules:
+    - Aoewif.Internal.Codegen.Base
+    - Aoewif.Internal.Codegen.Cpu
+    - Aoewif.Internal.Codegen.Cuda
     - Aoewif.Internal.Compute
-    - Aoewif.Internal.IR
-    - Aoewif.Internal.Schedule.Base
+    - Aoewif.Internal.Compute.IR
+    - Aoewif.Internal.Kernel.IR
+    - Aoewif.Internal.Kernel.Lower
     - Aoewif.Internal.Schedule.Builder
-    - Aoewif.Internal.Schedule.Core
     - Aoewif.Internal.Schedule.Cpu
     - Aoewif.Internal.Schedule.Cuda
+    - Aoewif.Internal.Schedule.IR
 
 tests:
   aoewif-test:

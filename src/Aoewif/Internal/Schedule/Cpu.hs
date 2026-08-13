@@ -1,46 +1,42 @@
 module Aoewif.Internal.Schedule.Cpu (
     CpuSchedule,
     newCpuSchedule,
-    cpuScheduleFunction,
-    cpuScheduleOperation,
+    cpuScheduleProgram,
+    cpuScheduleCompute,
     cpuSchedulePlan,
     splitCpuSchedule,
     reorderCpuSchedule,
-)
-where
+) where
 
-import           Aoewif.Internal.IR            (ComputeFunction, ComputeOp,
-                                                ComputeOpId)
-import           Aoewif.Internal.Schedule.Base (LoopId, LoopPlan, ScheduleError,
-                                                createLoopPlan, operationFor,
-                                                reorderLoopPlan, splitLoopPlan)
-import           Data.Word                     (Word64)
+import qualified Aoewif.Internal.Compute.IR  as Compute
+import           Aoewif.Internal.Schedule.IR (LoopId, LoopPlan, ScheduleError,
+                                              createLoopPlan, reorderLoopPlan,
+                                              splitLoopPlan)
+import           Data.Word                   (Word64)
 
 data CpuSchedule = CpuSchedule
-    { internalCpuScheduleFunction  :: ComputeFunction
-    , internalCpuScheduleOperation :: ComputeOp
-    , internalCpuSchedulePlan      :: LoopPlan
+    { internalCpuScheduleProgram :: Compute.Program
+    , internalCpuScheduleCompute :: Compute.Compute
+    , internalCpuSchedulePlan    :: LoopPlan
     }
-    deriving (Eq, Show)
+    deriving stock (Eq, Show)
 
-cpuScheduleFunction :: CpuSchedule -> ComputeFunction
-cpuScheduleFunction = internalCpuScheduleFunction
+newCpuSchedule :: Compute.Program -> Compute.Compute -> CpuSchedule
+newCpuSchedule program computation =
+    CpuSchedule
+        { internalCpuScheduleProgram = program
+        , internalCpuScheduleCompute = computation
+        , internalCpuSchedulePlan = createLoopPlan computation
+        }
+
+cpuScheduleProgram :: CpuSchedule -> Compute.Program
+cpuScheduleProgram = internalCpuScheduleProgram
+
+cpuScheduleCompute :: CpuSchedule -> Compute.Compute
+cpuScheduleCompute = internalCpuScheduleCompute
 
 cpuSchedulePlan :: CpuSchedule -> LoopPlan
 cpuSchedulePlan = internalCpuSchedulePlan
-
-newCpuSchedule :: ComputeFunction -> ComputeOpId -> Either ScheduleError CpuSchedule
-newCpuSchedule function operationId = do
-    operation <- operationFor function operationId
-    pure
-        CpuSchedule
-            { internalCpuScheduleFunction = function
-            , internalCpuScheduleOperation = operation
-            , internalCpuSchedulePlan = createLoopPlan operation
-            }
-
-cpuScheduleOperation :: CpuSchedule -> ComputeOp
-cpuScheduleOperation = internalCpuScheduleOperation
 
 splitCpuSchedule :: LoopId -> Word64 -> CpuSchedule -> Either ScheduleError (LoopId, LoopId, CpuSchedule)
 splitCpuSchedule loopId factor schedule = do

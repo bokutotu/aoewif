@@ -1,14 +1,14 @@
-module Aoewif.Internal.Schedule.Base (
+module Aoewif.Internal.Schedule.IR (
     LoopId,
     loopIdIndex,
     LoopExtent (..),
     staticLoopExtent,
-    LoopIndexExpr (..),
+    LoopIndexExpression (..),
     TailPredicate,
     tailPredicateIndex,
     tailPredicateExtent,
     LogicalIndex,
-    logicalIterator,
+    logicalIndexVariable,
     logicalExpression,
     logicalTailPredicates,
     CudaBinding (..),
@@ -16,9 +16,10 @@ module Aoewif.Internal.Schedule.Base (
     isBlockBinding,
     isThreadBinding,
     bindingDimension,
+    LoopKind (..),
     LoopAxis,
     loopAxisId,
-    loopSourceIterator,
+    loopSourceIndex,
     loopName,
     loopExtent,
     loopKind,
@@ -27,10 +28,11 @@ module Aoewif.Internal.Schedule.Base (
     planLoops,
     planLogicalIndices,
     lookupLogicalIndex,
+    logicalIndexFor,
     lookupLoopAxis,
+    loopAxisFor,
     loopFor,
     ScheduleError (..),
-    operationFor,
     createLoopPlan,
     splitLoopPlan,
     reorderLoopPlan,
@@ -39,18 +41,13 @@ module Aoewif.Internal.Schedule.Base (
 )
 where
 
-import           Aoewif.Internal.IR (ComputeFunction, ComputeOp, ComputeOpId,
-                                     Dim (..), IteratorId, IteratorKind (..),
-                                     SymbolId, computeIterators,
-                                     computeOpIdIndex, iteratorExtent,
-                                     iteratorId, iteratorKind, iteratorName,
-                                     lookupOperation)
-import           Data.List          (find, findIndex, partition)
-import           Data.Maybe         (fromMaybe)
-import           Data.Word          (Word64)
+import qualified Aoewif.Internal.Compute.IR as Compute
+import           Data.List                  (find, findIndex)
+import           Data.Maybe                 (fromJust)
+import           Data.Word                  (Word64)
 
 newtype LoopId = LoopId Int
-    deriving (Eq, Ord)
+    deriving stock (Eq, Ord)
 
 instance Show LoopId where
     show loopId = "LoopId " ++ show (loopIdIndex loopId)
@@ -60,9 +57,9 @@ loopIdIndex (LoopId index) = index
 
 data LoopExtent
     = StaticExtent Word64
-    | SymbolExtent SymbolId
+    | SymbolExtent Compute.SymbolId
     | CeilDivExtent LoopExtent Word64
-    deriving (Eq, Show)
+    deriving stock (Eq, Show)
 
 staticLoopExtent :: LoopExtent -> Maybe Word64
 staticLoopExtent extent = case extent of
@@ -70,40 +67,40 @@ staticLoopExtent extent = case extent of
     SymbolExtent _ -> Nothing
     CeilDivExtent dividend divisor -> ceilDivWord64 <$> staticLoopExtent dividend <*> pure divisor
 
-data LoopIndexExpr
+data LoopIndexExpression
     = LoopIndex LoopId
     | LoopConstant Word64
-    | AddIndex LoopIndexExpr LoopIndexExpr
-    | MulIndex LoopIndexExpr LoopIndexExpr
-    deriving (Eq, Show)
+    | AddIndex LoopIndexExpression LoopIndexExpression
+    | MulIndex LoopIndexExpression LoopIndexExpression
+    deriving stock (Eq, Show)
 
 data TailPredicate = TailPredicate
-    { internalTailPredicateIndex  :: LoopIndexExpr
+    { internalTailPredicateIndex  :: LoopIndexExpression
     , internalTailPredicateExtent :: LoopExtent
     }
-    deriving (Eq, Show)
+    deriving stock (Eq, Show)
 
-tailPredicateIndex :: TailPredicate -> LoopIndexExpr
+tailPredicateIndex :: TailPredicate -> LoopIndexExpression
 tailPredicateIndex = internalTailPredicateIndex
 
 tailPredicateExtent :: TailPredicate -> LoopExtent
 tailPredicateExtent = internalTailPredicateExtent
 
 data LogicalIndex = LogicalIndex
-    { internalLogicalIterator       :: IteratorId
-    , internalLogicalExpression     :: LoopIndexExpr
-    , internalLogicalTailPredicates :: [TailPredicate]
+    { internalLogicalIndexVariable :: Compute.IndexId
+    , internalLogicalExpression    :: LoopIndexExpression
+    , internalTailPredicates       :: [TailPredicate]
     }
-    deriving (Eq, Show)
+    deriving stock (Eq, Show)
 
-logicalIterator :: LogicalIndex -> IteratorId
-logicalIterator = internalLogicalIterator
+logicalIndexVariable :: LogicalIndex -> Compute.IndexId
+logicalIndexVariable = internalLogicalIndexVariable
 
-logicalExpression :: LogicalIndex -> LoopIndexExpr
+logicalExpression :: LogicalIndex -> LoopIndexExpression
 logicalExpression = internalLogicalExpression
 
 logicalTailPredicates :: LogicalIndex -> [TailPredicate]
-logicalTailPredicates = internalLogicalTailPredicates
+logicalTailPredicates = internalTailPredicates
 
 data CudaBinding
     = BlockX
@@ -112,10 +109,10 @@ data CudaBinding
     | ThreadX
     | ThreadY
     | ThreadZ
-    deriving (Eq, Ord, Show)
+    deriving stock (Eq, Ord, Show)
 
 data CudaDimension = DimensionX | DimensionY | DimensionZ
-    deriving (Eq, Ord, Show)
+    deriving stock (Eq, Ord, Show)
 
 isBlockBinding :: CudaBinding -> Bool
 isBlockBinding binding = case binding of
@@ -138,21 +135,26 @@ bindingDimension binding = case binding of
     BlockZ  -> DimensionZ
     ThreadZ -> DimensionZ
 
+data LoopKind
+    = SpatialLoop
+    | ReductionLoop
+    deriving stock (Eq, Show)
+
 data LoopAxis = LoopAxis
-    { internalLoopAxisId         :: LoopId
-    , internalLoopSourceIterator :: IteratorId
-    , internalLoopName           :: String
-    , internalLoopExtent         :: LoopExtent
-    , internalLoopKind           :: IteratorKind
-    , internalLoopBinding        :: Maybe CudaBinding
+    { internalLoopAxisId  :: LoopId
+    , internalLoopSource  :: Compute.IndexId
+    , internalLoopName    :: String
+    , internalLoopExtent  :: LoopExtent
+    , internalLoopKind    :: LoopKind
+    , internalLoopBinding :: Maybe CudaBinding
     }
-    deriving (Eq, Show)
+    deriving stock (Eq, Show)
 
 loopAxisId :: LoopAxis -> LoopId
 loopAxisId = internalLoopAxisId
 
-loopSourceIterator :: LoopAxis -> IteratorId
-loopSourceIterator = internalLoopSourceIterator
+loopSourceIndex :: LoopAxis -> Compute.IndexId
+loopSourceIndex = internalLoopSource
 
 loopName :: LoopAxis -> String
 loopName = internalLoopName
@@ -160,7 +162,7 @@ loopName = internalLoopName
 loopExtent :: LoopAxis -> LoopExtent
 loopExtent = internalLoopExtent
 
-loopKind :: LoopAxis -> IteratorKind
+loopKind :: LoopAxis -> LoopKind
 loopKind = internalLoopKind
 
 loopBinding :: LoopAxis -> Maybe CudaBinding
@@ -171,7 +173,7 @@ data LoopPlan = LoopPlan
     , internalPlanLoops          :: [LoopAxis]
     , internalPlanLogicalIndices :: [LogicalIndex]
     }
-    deriving (Eq, Show)
+    deriving stock (Eq, Show)
 
 planLoops :: LoopPlan -> [LoopAxis]
 planLoops = internalPlanLoops
@@ -179,30 +181,30 @@ planLoops = internalPlanLoops
 planLogicalIndices :: LoopPlan -> [LogicalIndex]
 planLogicalIndices = internalPlanLogicalIndices
 
-lookupLogicalIndex :: IteratorId -> LoopPlan -> Maybe LogicalIndex
-lookupLogicalIndex iterator = find ((== iterator) . logicalIterator) . planLogicalIndices
+lookupLogicalIndex :: Compute.IndexId -> LoopPlan -> Maybe LogicalIndex
+lookupLogicalIndex index = find ((== index) . logicalIndexVariable) . planLogicalIndices
+
+logicalIndexFor :: Compute.IndexId -> LoopPlan -> LogicalIndex
+logicalIndexFor index = fromJust . lookupLogicalIndex index
 
 lookupLoopAxis :: LoopId -> LoopPlan -> Maybe LoopAxis
 lookupLoopAxis loopId = find ((== loopId) . loopAxisId) . planLoops
 
-loopFor :: IteratorId -> LoopPlan -> Maybe LoopId
-loopFor iterator plan = case map loopAxisId matching of
-    [loopId] -> Just loopId
-    _        -> Nothing
-  where
-    matching = filter ((== iterator) . loopSourceIterator) (planLoops plan)
+loopAxisFor :: LoopId -> LoopPlan -> LoopAxis
+loopAxisFor loopId = fromJust . lookupLoopAxis loopId
+
+loopFor :: Compute.IndexId -> LoopPlan -> LoopId
+loopFor index = loopAxisId . fromJust . find ((== index) . loopSourceIndex) . planLoops
 
 data ScheduleError
-    = UnknownOperation Int
-    | UnknownIterator Int
-    | UnknownLoop Int
+    = UnknownLoop Int
     | ZeroSplitFactor
     | ReductionSplitUnsupported String
     | BoundLoopSplitUnsupported String
     | IncompleteLoopOrder Int Int
     | DuplicateLoop Int
     | ReductionReorderUnsupported
-    | ParallelLoopInsideReduction
+    | SpatialLoopInsideReduction
     | ReductionBindUnsupported String
     | LoopAlreadyBound String CudaBinding
     | BindingAlreadyUsed CudaBinding String
@@ -212,38 +214,36 @@ data ScheduleError
     | CudaDimensionExceeded CudaBinding Word64 Word64
     | CudaThreadsPerBlockExceeded Word64 Word64
     | ArithmeticOverflow String
-    deriving (Eq, Show)
+    deriving stock (Eq, Show)
 
-createLoopPlan :: ComputeOp -> LoopPlan
-createLoopPlan operation =
-    let iterators = computeIterators operation
-        (parallelIterators, reductionIterators) = partition ((== Parallel) . iteratorKind) iterators
-        normalized = parallelIterators ++ reductionIterators
-        axes = zipWith newAxis [0 ..] normalized
-        logicalIndices = map (newLogicalIndex axes) iterators
-     in LoopPlan
-            { internalLoopPlanNextIndex = length axes
-            , internalPlanLoops = axes
-            , internalPlanLogicalIndices = logicalIndices
-            }
+createLoopPlan :: Compute.Compute -> LoopPlan
+createLoopPlan computation =
+    LoopPlan
+        { internalLoopPlanNextIndex = length axes
+        , internalPlanLoops = axes
+        , internalPlanLogicalIndices = zipWith newLogicalIndex indices axes
+        }
   where
-    newAxis index iterator =
+    spatial = [(index, SpatialLoop) | index <- Compute.computeIndices computation]
+    reductions = [(index, ReductionLoop) | index <- Compute.reductionIndices (Compute.computeBody computation)]
+    indexed = spatial ++ reductions
+    indices = map fst indexed
+    axes = zipWith newAxis [0 ..] indexed
+    newAxis identifier (index, kind) =
         LoopAxis
-            { internalLoopAxisId = LoopId index
-            , internalLoopSourceIterator = iteratorId iterator
-            , internalLoopName = iteratorName iterator
-            , internalLoopExtent = extentFromDim (iteratorExtent iterator)
-            , internalLoopKind = iteratorKind iterator
+            { internalLoopAxisId = LoopId identifier
+            , internalLoopSource = Compute.indexId index
+            , internalLoopName = Compute.indexName index
+            , internalLoopExtent = extentFromDim (Compute.indexExtent index)
+            , internalLoopKind = kind
             , internalLoopBinding = Nothing
             }
-    newLogicalIndex axes iterator =
-        let loopId = loopAxisId (fromMaybe impossible (find ((== iteratorId iterator) . loopSourceIterator) axes))
-         in LogicalIndex
-                { internalLogicalIterator = iteratorId iterator
-                , internalLogicalExpression = LoopIndex loopId
-                , internalLogicalTailPredicates = []
-                }
-    impossible = error "every compute iterator must have a normalized loop"
+    newLogicalIndex index axis =
+        LogicalIndex
+            { internalLogicalIndexVariable = Compute.indexId index
+            , internalLogicalExpression = LoopIndex (loopAxisId axis)
+            , internalTailPredicates = []
+            }
 
 splitLoopPlan :: LoopId -> Word64 -> LoopPlan -> Either ScheduleError (LoopId, LoopId, LoopPlan)
 splitLoopPlan loopId factor plan
@@ -252,8 +252,8 @@ splitLoopPlan loopId factor plan
         position <- loopPosition loopId plan
         let original = planLoops plan !! position
         case loopKind original of
-            Reduction -> Left (ReductionSplitUnsupported (loopName original))
-            Parallel  -> pure ()
+            ReductionLoop -> Left (ReductionSplitUnsupported (loopName original))
+            SpatialLoop -> pure ()
         case loopBinding original of
             Just _  -> Left (BoundLoopSplitUnsupported (loopName original))
             Nothing -> pure ()
@@ -276,21 +276,21 @@ splitLoopPlan loopId factor plan
             before = take position (planLoops plan)
             after = drop (position + 1) (planLoops plan)
             rewritten = map (rewriteLogicalIndex original loopId replacement factor) (planLogicalIndices plan)
-            newPlan =
+            nextPlan =
                 plan
                     { internalLoopPlanNextIndex = internalLoopPlanNextIndex plan + 2
                     , internalPlanLoops = before ++ [outer, inner] ++ after
                     , internalPlanLogicalIndices = rewritten
                     }
-        pure (outerId, innerId, newPlan)
+        pure (outerId, innerId, nextPlan)
 
-rewriteLogicalIndex :: LoopAxis -> LoopId -> LoopIndexExpr -> Word64 -> LogicalIndex -> LogicalIndex
+rewriteLogicalIndex :: LoopAxis -> LoopId -> LoopIndexExpression -> Word64 -> LogicalIndex -> LogicalIndex
 rewriteLogicalIndex original target replacement factor logicalIndex
-    | logicalIterator logicalIndex /= loopSourceIterator original = logicalIndex
+    | logicalIndexVariable logicalIndex /= loopSourceIndex original = logicalIndex
     | otherwise =
         logicalIndex
             { internalLogicalExpression = replaceLoop target replacement (logicalExpression logicalIndex)
-            , internalLogicalTailPredicates = rewrittenPredicates ++ newPredicate
+            , internalTailPredicates = rewrittenPredicates ++ newPredicate
             }
   where
     rewrittenPredicates =
@@ -306,13 +306,13 @@ reorderLoopPlan order plan
     | length order /= length (planLoops plan) = Left (IncompleteLoopOrder (length (planLoops plan)) (length order))
     | otherwise = do
         reordered <- collect [] order
-        let currentReductions = map loopAxisId (filter ((== Reduction) . loopKind) (planLoops plan))
-            reorderedReductions = map loopAxisId (filter ((== Reduction) . loopKind) reordered)
+        let currentReductions = map loopAxisId (filter ((== ReductionLoop) . loopKind) (planLoops plan))
+            reorderedReductions = map loopAxisId (filter ((== ReductionLoop) . loopKind) reordered)
         if currentReductions /= reorderedReductions
             then Left ReductionReorderUnsupported
             else
-                if hasParallelInsideReduction reordered
-                    then Left ParallelLoopInsideReduction
+                if hasSpatialInsideReduction reordered
+                    then Left SpatialLoopInsideReduction
                     else pure plan{internalPlanLoops = reordered}
   where
     collect _ [] = pure []
@@ -328,8 +328,8 @@ bindLoopPlan loopId binding plan = do
     position <- loopPosition loopId plan
     let selected = planLoops plan !! position
     case loopKind selected of
-        Reduction -> Left (ReductionBindUnsupported (loopName selected))
-        Parallel  -> pure ()
+        ReductionLoop -> Left (ReductionBindUnsupported (loopName selected))
+        SpatialLoop   -> pure ()
     case loopBinding selected of
         Just existing -> Left (LoopAlreadyBound (loopName selected) existing)
         Nothing       -> pure ()
@@ -340,11 +340,6 @@ bindLoopPlan loopId binding plan = do
         loops = take position (planLoops plan) ++ [rebound] ++ drop (position + 1) (planLoops plan)
     pure plan{internalPlanLoops = loops}
 
-operationFor :: ComputeFunction -> ComputeOpId -> Either ScheduleError ComputeOp
-operationFor function operation = case lookupOperation operation function of
-    Just found -> Right found
-    Nothing    -> Left (UnknownOperation (computeOpIdIndex operation))
-
 loopPosition :: LoopId -> LoopPlan -> Either ScheduleError Int
 loopPosition loopId plan = maybe (Left (UnknownLoop (loopIdIndex loopId))) Right (findIndex ((== loopId) . loopAxisId) (planLoops plan))
 
@@ -353,10 +348,10 @@ loopAxisChecked loopId plan = do
     position <- loopPosition loopId plan
     pure (planLoops plan !! position)
 
-extentFromDim :: Dim -> LoopExtent
+extentFromDim :: Compute.Dim -> LoopExtent
 extentFromDim dimension = case dimension of
-    StaticDim value  -> StaticExtent value
-    SymbolDim symbol -> SymbolExtent symbol
+    Compute.StaticDim value  -> StaticExtent value
+    Compute.SymbolDim symbol -> SymbolExtent symbol
 
 ceilDivExtent :: Word64 -> LoopExtent -> Either ScheduleError LoopExtent
 ceilDivExtent divisor extent = case extent of
@@ -371,10 +366,10 @@ divisibleBy divisor extent = case staticLoopExtent extent of
     Just value -> value `mod` divisor == 0
     Nothing    -> False
 
-splitIndex :: LoopId -> LoopId -> Word64 -> LoopIndexExpr
+splitIndex :: LoopId -> LoopId -> Word64 -> LoopIndexExpression
 splitIndex outer inner factor = AddIndex (MulIndex (LoopIndex outer) (LoopConstant factor)) (LoopIndex inner)
 
-replaceLoop :: LoopId -> LoopIndexExpr -> LoopIndexExpr -> LoopIndexExpr
+replaceLoop :: LoopId -> LoopIndexExpression -> LoopIndexExpression -> LoopIndexExpression
 replaceLoop target replacement expression = case expression of
     LoopIndex loopId
         | loopId == target -> replacement
@@ -383,14 +378,14 @@ replaceLoop target replacement expression = case expression of
     AddIndex lhs rhs -> AddIndex (replaceLoop target replacement lhs) (replaceLoop target replacement rhs)
     MulIndex lhs rhs -> MulIndex (replaceLoop target replacement lhs) (replaceLoop target replacement rhs)
 
-hasParallelInsideReduction :: [LoopAxis] -> Bool
-hasParallelInsideReduction = go False
+hasSpatialInsideReduction :: [LoopAxis] -> Bool
+hasSpatialInsideReduction = go False
   where
     go _ [] = False
     go sawReduction (axis : rest) = case loopKind axis of
-        Parallel | sawReduction -> True
-        Parallel                -> go sawReduction rest
-        Reduction               -> go True rest
+        SpatialLoop | sawReduction -> True
+        SpatialLoop                -> go sawReduction rest
+        ReductionLoop              -> go True rest
 
 ceilDivWord64 :: Word64 -> Word64 -> Word64
 ceilDivWord64 value divisor = value `div` divisor + if value `mod` divisor == 0 then 0 else 1

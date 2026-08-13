@@ -19,7 +19,7 @@ module Aoewif.Internal.Compute (
     Tensor,
     Axis,
     Expr,
-    Kernel,
+    Computation,
     Entry,
     Program,
     ProgramM,
@@ -51,19 +51,21 @@ module Aoewif.Internal.Compute (
     compare,
     select,
     foldOver,
+    named,
     withProgram,
-    axisIteratorId,
+    axisIndexId,
 ) where
 
-import           Aoewif.Internal.IR   (ComputeError (..))
-import qualified Aoewif.Internal.IR   as IR
-import           Data.Kind            (Type)
-import           Data.Proxy           (Proxy (..))
-import           Data.Word            (Word64)
-import           GHC.OverloadedLabels (IsLabel (..))
-import           GHC.TypeLits         (KnownSymbol, symbolVal)
-import           Prelude              hiding (compare, exp, log, maximum,
-                                       minimum)
+import qualified Aoewif.Internal.Compute.IR as IR
+import           Data.Char                  (isAsciiLower, isAsciiUpper,
+                                             isDigit)
+import           Data.Kind                  (Type)
+import           Data.Proxy                 (Proxy (..))
+import           Data.Word                  (Word64)
+import           GHC.OverloadedLabels       (IsLabel (..))
+import           GHC.TypeLits               (KnownSymbol, symbolVal)
+import           Prelude                    hiding (compare, exp, log, maximum,
+                                             minimum)
 
 data F32
 
@@ -88,11 +90,11 @@ instance (KnownSymbol label) => IsLabel label Name where
 
 newtype Dim = Dim IR.Dim
 
-newtype Tensor scope rank element = Tensor IR.TensorValueId
+newtype Tensor scope rank element = Tensor IR.Tensor
 
 type role Tensor nominal nominal nominal
 
-newtype Axis scope kind = Axis IR.IteratorId
+newtype Axis scope kind = Axis IR.IndexVar
 
 type role Axis nominal nominal
 
@@ -101,7 +103,7 @@ data Expr scope element where
     BooleanExpression :: Bool -> Expr scope Boolean
     IndexExpression :: Axis scope kind -> Expr scope Index
     IndexLiteralExpression :: Word64 -> Expr scope Index
-    LoadExpression :: Tensor scope rank F32 -> [IR.IndexExpr] -> Expr scope F32
+    LoadExpression :: IR.Tensor -> [IR.IndexExpression] -> Expr scope F32
     AddExpression :: Expr scope F32 -> Expr scope F32 -> Expr scope F32
     SubExpression :: Expr scope F32 -> Expr scope F32 -> Expr scope F32
     MulExpression :: Expr scope F32 -> Expr scope F32 -> Expr scope F32
@@ -114,38 +116,56 @@ data Expr scope element where
     CompareExpression :: Comparison -> Expr scope element -> Expr scope element -> Expr scope Boolean
     SelectExpression :: Expr scope Boolean -> Expr scope element -> Expr scope element -> Expr scope element
     FoldExpression :: Dim -> Float -> (Axis scope Reduction -> Expr scope F32 -> Expr scope F32) -> Expr scope F32
-    ScalarExpression :: IR.ScalarValueId -> Expr scope element
+    AccumulatorExpression :: IR.AccumulatorId -> Expr scope F32
+    NamedExpression :: String -> Expr scope element -> Expr scope element
 
 type role Expr nominal nominal
 
-data Kernel scope (axes :: Type -> Type) rank element where
-    Kernel :: IR.TensorValueId -> axes scope -> Kernel scope axes rank element
+data Computation scope (axes :: Type -> Type) rank element where
+    Computation :: IR.Compute -> axes scope -> Computation scope axes rank element
 
-type role Kernel nominal nominal nominal nominal
+type role Computation nominal nominal nominal nominal
 
 data Entry scope (axes :: Type -> Type) where
-    Entry :: IR.TensorValueId -> axes scope -> Entry scope axes
+    Entry :: IR.Compute -> axes scope -> Entry scope axes
 
 type role Entry nominal nominal
 
 data Program (axes :: Type -> Type) where
-    Program :: IR.ComputeFunction -> IR.ComputeOpId -> axes scope -> Program axes
+    Program :: IR.Program -> IR.Compute -> axes scope -> Program axes
+
+data ProgramState = ProgramState
+    { stateSymbols         :: [IR.Symbol]
+    , stateInputs          :: [IR.Tensor]
+    , stateComputes        :: [IR.Compute]
+    , stateNextTensor      :: !Int
+    , stateNextIndex       :: !Int
+    , stateNextAccumulator :: !Int
+    , stateNextNode        :: !Int
+    }
 
 newtype ProgramM scope value = ProgramM
-    { runProgramM :: IR.FunctionBuilder value
+    { runProgramM :: ProgramState -> Either ComputeError (value, ProgramState)
     }
 
 type role ProgramM nominal representational
 
 instance Functor (ProgramM scope) where
-    fmap transform (ProgramM action) = ProgramM (transform <$> action)
+    fmap transform (ProgramM action) = ProgramM $ \state -> do
+        (value, nextState) <- action state
+        pure (transform value, nextState)
 
 instance Applicative (ProgramM scope) where
-    pure = ProgramM . pure
-    ProgramM functionAction <*> ProgramM valueAction = ProgramM (functionAction <*> valueAction)
+    pure value = ProgramM $ \state -> Right (value, state)
+    ProgramM functionAction <*> ProgramM valueAction = ProgramM $ \state -> do
+        (function, functionState) <- functionAction state
+        (value, valueState) <- valueAction functionState
+        pure (function value, valueState)
 
 instance Monad (ProgramM scope) where
-    ProgramM action >>= next = ProgramM (action >>= runProgramM . next)
+    ProgramM action >>= next = ProgramM $ \state -> do
+        (value, nextState) <- action state
+        runProgramM (next value) nextState
 
 type family Axes scope rank = result | result -> scope rank where
     Axes scope R1 = Axis scope Spatial
@@ -154,32 +174,36 @@ type family Axes scope rank = result | result -> scope rank where
 
 class IsShape shape rank | shape -> rank where
     shapeDimensions :: shape -> [Dim]
-    createSpatialAxes :: forall scope. shape -> IR.ComputeBuilder (Axes scope rank)
+    createSpatialAxes :: forall scope. shape -> ProgramM scope (Axes scope rank)
+    spatialIndices :: Axes scope rank -> [IR.IndexVar]
 
 instance IsShape Dim R1 where
     shapeDimensions dimension = [dimension]
-    createSpatialAxes (Dim extent) = Axis <$> IR.parallel "axis0" extent
+    createSpatialAxes (Dim extent) = Axis <$> freshIndex "axis0" extent
+    spatialIndices (Axis axis) = [axis]
 
 instance IsShape (Dim, Dim) R2 where
     shapeDimensions (first, second) = [first, second]
     createSpatialAxes (Dim first, Dim second) = do
-        firstAxis <- Axis <$> IR.parallel "axis0" first
-        secondAxis <- Axis <$> IR.parallel "axis1" second
+        firstAxis <- Axis <$> freshIndex "axis0" first
+        secondAxis <- Axis <$> freshIndex "axis1" second
         pure (firstAxis, secondAxis)
+    spatialIndices (Axis first, Axis second) = [first, second]
 
 instance IsShape (Dim, Dim, Dim) R3 where
     shapeDimensions (first, second, third) = [first, second, third]
     createSpatialAxes (Dim first, Dim second, Dim third) = do
-        firstAxis <- Axis <$> IR.parallel "axis0" first
-        secondAxis <- Axis <$> IR.parallel "axis1" second
-        thirdAxis <- Axis <$> IR.parallel "axis2" third
+        firstAxis <- Axis <$> freshIndex "axis0" first
+        secondAxis <- Axis <$> freshIndex "axis1" second
+        thirdAxis <- Axis <$> freshIndex "axis2" third
         pure (firstAxis, secondAxis, thirdAxis)
+    spatialIndices (Axis first, Axis second, Axis third) = [first, second, third]
 
 class IsIndex value (scope :: Type) | value -> scope where
-    indexExpression :: value -> IR.IndexExpr
+    indexExpression :: value -> IR.IndexExpression
 
 instance IsIndex (Axis scope kind) scope where
-    indexExpression (Axis identifier) = IR.IteratorIndex identifier
+    indexExpression (Axis axis) = IR.VariableIndex axis
 
 newtype ConstantIndex scope = ConstantIndex Word64
 
@@ -189,7 +213,7 @@ instance IsIndex (ConstantIndex scope) scope where
     indexExpression (ConstantIndex value) = IR.ConstantIndex value
 
 class IsIndices rank indices (scope :: Type) where
-    indexExpressions :: indices -> [IR.IndexExpr]
+    indexExpressions :: indices -> [IR.IndexExpression]
 
 instance (IsIndex indexValue scope) => IsIndices R1 indexValue scope where
     indexExpressions value = [indexExpression value]
@@ -213,20 +237,47 @@ data Comparison
     | GreaterEqual
     deriving stock (Eq, Show)
 
+data ComputeError
+    = DimensionMismatch
+    | ConstantIndexRequiresStaticDimension
+    | ConstantIndexOutOfBounds Word64 Word64
+    | InvalidFunctionIdentifier String
+    deriving stock (Eq, Show)
+
 program ::
     Name ->
     (forall scope. ProgramM scope (Entry scope axes)) ->
     Either ComputeError (Program axes)
-program (Name name) action = do
-    (Entry output axes, function) <- IR.buildComputeFunctionWith name (runProgramM action)
-    tensor <- maybe (Left (IR.UnknownTensor (IR.tensorValueIdIndex output))) Right (IR.lookupTensor output function)
-    operation <- case IR.tensorDefinition tensor of
-        IR.ComputeResult identifier -> Right identifier
-        IR.InputTensor _ -> Left (IR.UnknownTensor (IR.tensorValueIdIndex output))
-    pure (Program function operation axes)
+program (Name name) action
+    | not (validIdentifier name) = Left (InvalidFunctionIdentifier name)
+    | otherwise = do
+        (Entry output axes, finalState) <- runProgramM action initialState
+        let computeProgram =
+                IR.Program
+                    { IR.programName = name
+                    , IR.programSymbols = stateSymbols finalState
+                    , IR.programInputs = stateInputs finalState
+                    , IR.programComputes = stateComputes finalState
+                    , IR.programOutput = IR.computeResult output
+                    }
+        pure (Program computeProgram output axes)
+  where
+    initialState =
+        ProgramState
+            { stateSymbols = []
+            , stateInputs = []
+            , stateComputes = []
+            , stateNextTensor = 0
+            , stateNextIndex = 0
+            , stateNextAccumulator = 0
+            , stateNextNode = 0
+            }
 
 dim :: Name -> ProgramM scope Dim
-dim (Name name) = ProgramM (Dim . IR.SymbolDim <$> IR.symbol name)
+dim (Name name) = ProgramM $ \state ->
+    let identifier = IR.SymbolId (length (stateSymbols state))
+        value = IR.Symbol identifier name
+     in Right (Dim (IR.SymbolDim identifier), state{stateSymbols = stateSymbols state ++ [value]})
 
 staticDim :: Word64 -> Dim
 staticDim = Dim . IR.StaticDim
@@ -237,9 +288,16 @@ input ::
     Name ->
     shape ->
     ProgramM scope (Tensor scope rank element)
-input (Name name) shape = ProgramM $ do
-    let dimensions = map (\(Dim dimension) -> dimension) (shapeDimensions shape)
-    Tensor <$> IR.input name (IR.tensorTypeF32 dimensions)
+input (Name name) shape = ProgramM $ \state ->
+    let identifier = IR.TensorId (stateNextTensor state)
+        dimensions = map (\(Dim dimension) -> dimension) (shapeDimensions shape)
+        tensor = IR.Tensor identifier name dimensions (IR.InputTensor (length (stateInputs state)))
+        nextState =
+            state
+                { stateInputs = stateInputs state ++ [tensor]
+                , stateNextTensor = stateNextTensor state + 1
+                }
+     in Right (Tensor tensor, nextState)
 
 compute ::
     forall shape scope rank axes.
@@ -247,19 +305,16 @@ compute ::
     Name ->
     shape ->
     (Axes scope rank -> (axes scope, Expr scope F32)) ->
-    ProgramM scope (Kernel scope axes rank F32)
-compute (Name name) shape build = ProgramM $ do
-    (axes, tensor) <- IR.computeWith name $ do
-        spatialAxes <- createSpatialAxes shape
-        let (exportedAxes, body) = build spatialAxes
-        result <- lowerExpression body
-        pure (exportedAxes, result)
-    pure (Kernel tensor axes)
+    ProgramM scope (Computation scope axes rank F32)
+compute (Name name) shape build = do
+    axes <- createSpatialAxes shape
+    let (exportedAxes, expression) = build axes
+    body <- reifyExpression expression
+    computation <- appendCompute name (spatialIndices @shape @rank axes) body
+    pure (Computation computation exportedAxes)
 
-entry :: Kernel scope axes rank element -> ProgramM scope (Entry scope axes)
-entry (Kernel tensor axes) = ProgramM $ do
-    IR.markOutput tensor
-    pure (Entry tensor axes)
+entry :: Computation scope axes rank element -> ProgramM scope (Entry scope axes)
+entry (Computation computation axes) = pure (Entry computation axes)
 
 (!) ::
     forall rank indices scope.
@@ -267,8 +322,7 @@ entry (Kernel tensor axes) = ProgramM $ do
     Tensor scope rank F32 ->
     indices ->
     Expr scope F32
-Tensor tensor ! indices =
-    LoadExpression (Tensor tensor) (indexExpressions @rank @indices @scope indices)
+Tensor tensor ! indices = LoadExpression tensor (indexExpressions @rank @indices @scope indices)
 
 infixl 9 !
 
@@ -331,60 +385,117 @@ foldOver ::
     Expr scope F32
 foldOver = FoldExpression
 
+named :: Name -> Expr scope element -> Expr scope element
+named (Name name) = NamedExpression name
+
 withProgram ::
     Program axes ->
-    (forall scope. IR.ComputeFunction -> IR.ComputeOpId -> axes scope -> result) ->
+    (forall scope. IR.Program -> IR.Compute -> axes scope -> result) ->
     result
-withProgram (Program function operation axes) consume = consume function operation axes
+withProgram (Program computeProgram computation axes) consume = consume computeProgram computation axes
 
-axisIteratorId :: Axis scope kind -> IR.IteratorId
-axisIteratorId (Axis identifier) = identifier
+axisIndexId :: Axis scope kind -> IR.IndexId
+axisIndexId (Axis axis) = IR.indexId axis
 
-lowerExpression :: Expr scope element -> IR.ComputeBuilder IR.ScalarValueId
-lowerExpression expression = case expression of
-    F32Expression value -> IR.constant (IR.F32Literal value)
-    BooleanExpression value -> IR.constant (IR.BoolLiteral value)
-    IndexExpression (Axis identifier) -> IR.index identifier
-    IndexLiteralExpression value -> IR.constant (IR.IndexLiteral value)
-    LoadExpression (Tensor tensor) indices -> IR.readTensor tensor indices
-    AddExpression lhs rhs -> lowerBinary IR.add lhs rhs
-    SubExpression lhs rhs -> lowerBinary IR.sub lhs rhs
-    MulExpression lhs rhs -> lowerBinary IR.mul lhs rhs
-    DivExpression lhs rhs -> lowerBinary IR.divide lhs rhs
-    FmaExpression lhs rhs accumulator -> do
-        loweredLhs <- lowerExpression lhs
-        loweredRhs <- lowerExpression rhs
-        loweredAccumulator <- lowerExpression accumulator
-        IR.fma loweredLhs loweredRhs loweredAccumulator
-    MinExpression lhs rhs -> lowerBinary IR.minimum lhs rhs
-    MaxExpression lhs rhs -> lowerBinary IR.maximum lhs rhs
-    ExpExpression value -> lowerExpression value >>= IR.expScalar
-    LogExpression value -> lowerExpression value >>= IR.logScalar
-    CompareExpression predicate lhs rhs -> do
-        loweredLhs <- lowerExpression lhs
-        loweredRhs <- lowerExpression rhs
-        IR.compare (lowerComparison predicate) loweredLhs loweredRhs
-    SelectExpression condition trueValue falseValue -> do
-        loweredCondition <- lowerExpression condition
-        loweredTrueValue <- lowerExpression trueValue
-        loweredFalseValue <- lowerExpression falseValue
-        IR.selectScalar loweredCondition loweredTrueValue loweredFalseValue
-    FoldExpression (Dim extent) initialValue body -> do
-        reductionAxis <- Axis <$> IR.reduction "reduction" extent
-        accumulator <- IR.reductionInit (IR.F32Literal initialValue)
-        lowerExpression (body reductionAxis (ScalarExpression accumulator))
-    ScalarExpression identifier -> pure identifier
+appendCompute :: String -> [IR.IndexVar] -> IR.Expression -> ProgramM scope IR.Compute
+appendCompute name indices body = ProgramM $ \state ->
+    let computationId = IR.ComputeId (length (stateComputes state))
+        tensor =
+            IR.Tensor
+                { IR.tensorId = IR.TensorId (stateNextTensor state)
+                , IR.tensorName = name
+                , IR.tensorShape = map IR.indexExtent indices
+                , IR.tensorKind = IR.ResultTensor computationId
+                }
+        computation =
+            IR.Compute
+                { IR.computeName = name
+                , IR.computeIndices = indices
+                , IR.computeResult = tensor
+                , IR.computeBody = body
+                }
+        nextState =
+            state
+                { stateComputes = stateComputes state ++ [computation]
+                , stateNextTensor = stateNextTensor state + 1
+                }
+     in Right (computation, nextState)
+
+freshIndex :: String -> IR.Dim -> ProgramM scope IR.IndexVar
+freshIndex name extent = ProgramM $ \state ->
+    let value = IR.IndexVar (IR.IndexId (stateNextIndex state)) name extent
+     in Right (value, state{stateNextIndex = stateNextIndex state + 1})
+
+freshAccumulator :: ProgramM scope IR.AccumulatorId
+freshAccumulator = ProgramM $ \state ->
+    let value = IR.AccumulatorId (stateNextAccumulator state)
+     in Right (value, state{stateNextAccumulator = stateNextAccumulator state + 1})
+
+freshNode :: ProgramM scope IR.ComputeNodeId
+freshNode = ProgramM $ \state ->
+    let value = IR.ComputeNodeId (stateNextNode state)
+     in Right (value, state{stateNextNode = stateNextNode state + 1})
+
+reifyExpression :: Expr scope element -> ProgramM scope IR.Expression
+reifyExpression expression = case expression of
+    F32Expression value -> pure (IR.LiteralExpression (IR.F32Literal value))
+    BooleanExpression value -> pure (IR.LiteralExpression (IR.BoolLiteral value))
+    IndexExpression (Axis axis) -> pure (IR.IndexValueExpression axis)
+    IndexLiteralExpression value -> pure (IR.LiteralExpression (IR.IndexLiteral value))
+    LoadExpression tensor indices ->
+        IR.ReadExpression tensor
+            <$> mapM reifyAccessIndex (zip (IR.tensorShape tensor) indices)
+    AddExpression lhs rhs -> reifyBinary IR.AddExpression lhs rhs
+    SubExpression lhs rhs -> reifyBinary IR.SubExpression lhs rhs
+    MulExpression lhs rhs -> reifyBinary IR.MulExpression lhs rhs
+    DivExpression lhs rhs -> reifyBinary IR.DivExpression lhs rhs
+    FmaExpression lhs rhs accumulator ->
+        IR.FmaExpression <$> reifyExpression lhs <*> reifyExpression rhs <*> reifyExpression accumulator
+    MinExpression lhs rhs -> reifyBinary IR.MinExpression lhs rhs
+    MaxExpression lhs rhs -> reifyBinary IR.MaxExpression lhs rhs
+    ExpExpression value -> IR.ExpExpression <$> reifyExpression value
+    LogExpression value -> IR.LogExpression <$> reifyExpression value
+    CompareExpression predicate lhs rhs ->
+        IR.CompareExpression (reifyComparison predicate) <$> reifyExpression lhs <*> reifyExpression rhs
+    SelectExpression condition trueValue falseValue ->
+        IR.SelectExpression
+            <$> reifyExpression condition
+            <*> reifyExpression trueValue
+            <*> reifyExpression falseValue
+    FoldExpression (Dim extent) initialValue buildBody -> do
+        reductionIndex <- freshIndex "reduction" extent
+        accumulator <- freshAccumulator
+        body <- reifyExpression (buildBody (Axis reductionIndex) (AccumulatorExpression accumulator))
+        pure (IR.FoldExpression reductionIndex initialValue accumulator body)
+    AccumulatorExpression identifier -> pure (IR.AccumulatorExpression identifier)
+    NamedExpression name value -> do
+        identifier <- freshNode
+        IR.NamedExpression identifier name <$> reifyExpression value
   where
-    lowerBinary operation lhs rhs = do
-        loweredLhs <- lowerExpression lhs
-        loweredRhs <- lowerExpression rhs
-        operation loweredLhs loweredRhs
+    reifyBinary constructor lhs rhs = constructor <$> reifyExpression lhs <*> reifyExpression rhs
+    reifyAccessIndex (dimension, accessIndex@(IR.VariableIndex variable))
+        | dimension == IR.indexExtent variable = pure accessIndex
+        | otherwise = throwCompute DimensionMismatch
+    reifyAccessIndex (IR.StaticDim extent, accessIndex@(IR.ConstantIndex value))
+        | value < extent = pure accessIndex
+        | otherwise = throwCompute (ConstantIndexOutOfBounds value extent)
+    reifyAccessIndex (IR.SymbolDim _, IR.ConstantIndex _) = throwCompute ConstantIndexRequiresStaticDimension
 
-lowerComparison :: Comparison -> IR.ComparePredicate
-lowerComparison comparison = case comparison of
+throwCompute :: ComputeError -> ProgramM scope value
+throwCompute computeError = ProgramM $ \_ -> Left computeError
+
+reifyComparison :: Comparison -> IR.ComparePredicate
+reifyComparison comparison = case comparison of
     Equal        -> IR.Equal
     NotEqual     -> IR.NotEqual
     LessThan     -> IR.Less
     LessEqual    -> IR.LessEqual
     GreaterThan  -> IR.Greater
     GreaterEqual -> IR.GreaterEqual
+
+validIdentifier :: String -> Bool
+validIdentifier (first : rest) = validFirst first && all validRest rest
+  where
+    validFirst character = character == '_' || isAsciiLower character || isAsciiUpper character
+    validRest character = validFirst character || isDigit character
+validIdentifier [] = False

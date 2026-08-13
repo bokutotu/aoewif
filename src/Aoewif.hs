@@ -6,5 +6,5 @@ module Aoewif (
 where
 
 import           Aoewif.Codegen
-import           Aoewif.Compute  hiding (UnknownIterator)
+import           Aoewif.Compute
 import           Aoewif.Schedule
