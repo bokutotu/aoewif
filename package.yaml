@@ -42,3 +42,5 @@ tests:
     dependencies:
       - aoewif
       - hspec
+    build-tools:
+      - hspec-discover
