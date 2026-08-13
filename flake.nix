@@ -46,9 +46,7 @@
             string-interpolate = hlib.doJailbreak super.string-interpolate;
             tasty-hspec = hlib.doJailbreak super.tasty-hspec;
             toml-reader = hlib.dontCheck super.toml-reader;
-            weeder = hlib.justStaticExecutables (
-              hlib.dontCheck (hlib.doJailbreak super.weeder)
-            );
+            weeder = hlib.justStaticExecutables (hlib.dontCheck (hlib.doJailbreak super.weeder));
             haskell-language-server =
               hlib.overrideCabal
                 (disableFlags
@@ -90,6 +88,22 @@
                 });
           };
         };
+      mkCabalConfig =
+        pkgs: haskellPackages:
+        let
+          hspecDiscoverVersion = haskellPackages.hspec-discover.version;
+          hspecDiscoverRepository = pkgs.linkFarm "hspec-discover-cabal-repository" [
+            {
+              name = "hspec-discover-${hspecDiscoverVersion}.tar.gz";
+              path = haskellPackages.hspec-discover.src;
+            }
+          ];
+        in
+        pkgs.writeText "aoewif-cabal.config" ''
+          repository hspec-discover
+            url: file+noindex://${hspecDiscoverRepository}#shared-cache
+          active-repositories: hspec-discover
+        '';
       mkPackage =
         system:
         let
@@ -105,11 +119,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           haskellPackages = mkHaskellPackages pkgs;
           ghc = haskellPackages.ghcWithPackages (haskellPkgs: [ haskellPkgs.hspec ]);
-          cabalConfig = pkgs.writeText "weeder-cabal.config" ''
-            repository hackage.haskell.org
-              url: https://hackage.haskell.org/
-              secure: False
-          '';
+          cabalConfig = mkCabalConfig pkgs haskellPackages;
           haskellFormat = pkgs.writeShellApplication {
             name = "fourmolu-then-stylish-haskell";
             runtimeInputs = [
@@ -131,7 +141,12 @@
             text = ''
               export CABAL_CONFIG=${cabalConfig}
               hpack
-              cabal test --offline
+              cabal_cache="$PWD/dist-newstyle/pre-commit-cabal-cache"
+              cabal_store="$PWD/dist-newstyle/pre-commit-cabal-store-$(ghc --numeric-version)"
+              cabal \
+                --remote-repo-cache="$cabal_cache" \
+                --store-dir="$cabal_store" \
+                test
             '';
           };
           weederCheck = pkgs.writeShellApplication {
@@ -145,9 +160,13 @@
             text = ''
               export CABAL_CONFIG=${cabalConfig}
               hpack
+              cabal_cache="$PWD/dist-newstyle/pre-commit-cabal-cache"
+              cabal_store="$PWD/dist-newstyle/pre-commit-cabal-store-$(ghc --numeric-version)"
               weeder_build_dir="dist-newstyle/weeder-$(ghc --numeric-version)"
-              cabal build all \
-                --offline \
+              cabal \
+                --remote-repo-cache="$cabal_cache" \
+                --store-dir="$cabal_store" \
+                build all \
                 --enable-tests \
                 --builddir="$weeder_build_dir" \
                 --ghc-options=-fwrite-ide-info
@@ -235,6 +254,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           haskellPackages = mkHaskellPackages pkgs;
           ghc = haskellPackages.ghcWithPackages (haskellPkgs: [ haskellPkgs.hspec ]);
+          cabalConfig = mkCabalConfig pkgs haskellPackages;
           hls = pkgs.writeShellScriptBin "hls" ''
             exec ${haskellPackages.haskell-language-server}/bin/haskell-language-server-wrapper "$@"
           '';
@@ -242,6 +262,7 @@
         in
         {
           default = pkgs.mkShellNoCC {
+            CABAL_CONFIG = cabalConfig;
             packages = [
               ghc
               pkgs.cabal-install
