@@ -322,7 +322,7 @@ spec = describe "schedule eDSL" $ do
                                                 [ Store
                                                     (TensorId 0)
                                                     [IterationIndex (IndexId 0)]
-                                                    (LiteralExpr (F32Literal 1))
+                                                    (DataLiteralExpr 1)
                                                 ]
                                             )
                                         )
@@ -367,7 +367,7 @@ spec = describe "schedule eDSL" $ do
                                                                 [ Store
                                                                     (TensorId 0)
                                                                     [IterationIndex (IndexId 0)]
-                                                                    (LiteralExpr (F32Literal 1))
+                                                                    (DataLiteralExpr 1)
                                                                 ]
                                                             )
                                                         )

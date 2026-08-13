@@ -7,8 +7,7 @@ module Aoewif.IR (
     BlockId (..),
     DimExpr (..),
     Symbol (..),
-    DType (..),
-    ScalarLiteral (..),
+    DataType (..),
     ComparePredicate (..),
     TensorKind (..),
     TensorDecl (..),
@@ -23,3 +22,5 @@ module Aoewif.IR (
 ) where
 
 import           Aoewif.Internal.IR
+import           Aoewif.Internal.Primitive (ComparePredicate (..),
+                                            DataType (..))

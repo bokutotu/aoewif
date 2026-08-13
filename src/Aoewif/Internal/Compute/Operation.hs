@@ -1,15 +1,17 @@
 module Aoewif.Internal.Compute.Operation (
     ComputeIndexExpr (..),
     ComputeValueId (..),
-    ScalarExpr (..),
-    exprType,
+    DataExpr (..),
+    PredicateExpr (..),
+    IndexValueExpr (..),
     ReducerKind (..),
     ComputeStatement (..),
     ComputeBlock (..),
 ) where
 
-import           Aoewif.Internal.IR
-import           Data.Word          (Word64)
+import           Aoewif.Internal.IR        (IndexId, TensorId)
+import           Aoewif.Internal.Primitive (ComparePredicate)
+import           Data.Word                 (Word64)
 
 data ComputeIndexExpr
     = IterationIndex IndexId
@@ -22,39 +24,33 @@ data ComputeIndexExpr
 newtype ComputeValueId = ComputeValueId Int
     deriving stock (Eq, Ord, Show)
 
-data ScalarExpr
-    = LiteralExpr ScalarLiteral
-    | IndexValueExpr IndexId
+data DataExpr
+    = DataLiteralExpr Float
     | ValueExpr ComputeValueId
-    | AddExpr ScalarExpr ScalarExpr
-    | SubExpr ScalarExpr ScalarExpr
-    | MulExpr ScalarExpr ScalarExpr
-    | DivExpr ScalarExpr ScalarExpr
-    | FmaExpr ScalarExpr ScalarExpr ScalarExpr
-    | MinExpr ScalarExpr ScalarExpr
-    | MaxExpr ScalarExpr ScalarExpr
-    | ExpExpr ScalarExpr
-    | LogExpr ScalarExpr
-    | CompareExpr ComparePredicate ScalarExpr ScalarExpr
-    | SelectExpr ScalarExpr ScalarExpr ScalarExpr
+    | AddExpr DataExpr DataExpr
+    | SubExpr DataExpr DataExpr
+    | MulExpr DataExpr DataExpr
+    | DivExpr DataExpr DataExpr
+    | FmaExpr DataExpr DataExpr DataExpr
+    | MinExpr DataExpr DataExpr
+    | MaxExpr DataExpr DataExpr
+    | ExpExpr DataExpr
+    | LogExpr DataExpr
+    | SelectDataExpr PredicateExpr DataExpr DataExpr
     deriving stock (Eq, Show)
 
-exprType :: ScalarExpr -> DType
-exprType expression = case expression of
-    LiteralExpr literal      -> scalarLiteralType literal
-    IndexValueExpr _         -> IndexType
-    ValueExpr _              -> F32Type
-    AddExpr _ _              -> F32Type
-    SubExpr _ _              -> F32Type
-    MulExpr _ _              -> F32Type
-    DivExpr _ _              -> F32Type
-    FmaExpr{}                -> F32Type
-    MinExpr _ _              -> F32Type
-    MaxExpr _ _              -> F32Type
-    ExpExpr _                -> F32Type
-    LogExpr _                -> F32Type
-    CompareExpr{}            -> BoolType
-    SelectExpr _ trueValue _ -> exprType trueValue
+data PredicateExpr
+    = PredicateLiteralExpr Bool
+    | CompareDataExpr ComparePredicate DataExpr DataExpr
+    | CompareBooleanExpr ComparePredicate PredicateExpr PredicateExpr
+    | CompareIndexExpr ComparePredicate IndexValueExpr IndexValueExpr
+    | SelectPredicateExpr PredicateExpr PredicateExpr PredicateExpr
+    deriving stock (Eq, Show)
+
+data IndexValueExpr
+    = ComputeIndexValueExpr ComputeIndexExpr
+    | SelectIndexValueExpr PredicateExpr IndexValueExpr IndexValueExpr
+    deriving stock (Eq, Show)
 
 data ReducerKind
     = AddReducer
@@ -72,13 +68,13 @@ data ComputeStatement
     | Store
         { statementTarget  :: TensorId
         , statementIndices :: [ComputeIndexExpr]
-        , statementValue   :: ScalarExpr
+        , statementValue   :: DataExpr
         }
     | Update
         { statementReducer :: ReducerKind
         , statementTarget  :: TensorId
         , statementIndices :: [ComputeIndexExpr]
-        , statementValue   :: ScalarExpr
+        , statementValue   :: DataExpr
         }
     deriving stock (Eq, Show)
 

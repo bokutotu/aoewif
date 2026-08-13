@@ -33,6 +33,7 @@ library:
     - Aoewif.Internal.IR
     - Aoewif.Internal.Kernel.Lower
     - Aoewif.Internal.Kernel.Operation
+    - Aoewif.Internal.Primitive
     - Aoewif.Internal.Schedule.Builder
 
 tests:

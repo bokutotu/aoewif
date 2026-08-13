@@ -70,6 +70,83 @@ spec = describe "compute to source integration" $ do
                 , "}"
                 ]
 
+    it "generates distinct index, boolean, and float scalar temporaries" $ do
+        let computeIR = program #scalar_types $ do
+                let size = staticDim 4
+                result <- output #result f32 [size]
+                for #i size $ \element ->
+                    block #choose $ do
+                        let condition = compare_ Less (index element) (indexLiteral 2)
+                        store result [element] (select condition 1 0)
+            generated = generateC computeIR
+        (cSourceText generated, cFunctionName generated)
+            `shouldBe` ( unlines
+                            [ "#include <math.h>"
+                            , "#include <stdbool.h>"
+                            , "#include <stddef.h>"
+                            , ""
+                            , "#pragma STDC FP_CONTRACT OFF"
+                            , ""
+                            , "void scalar_types(float* output0) {"
+                            , "    for (size_t loop0 = 0; loop0 < 4; ++loop0) {"
+                            , "        size_t scalar0 = loop0;"
+                            , "        size_t scalar1 = 2u;"
+                            , "        bool scalar2 = (scalar0 < scalar1);"
+                            , "        float scalar3 = 1.0f;"
+                            , "        float scalar4 = 0.0f;"
+                            , "        float scalar5 = (scalar2 ? scalar3 : scalar4);"
+                            , "        output0[loop0] = scalar5;"
+                            , "    }"
+                            , "}"
+                            ]
+                       , "scalar_types"
+                       )
+
+    it "lowers predicate and index selections" $ do
+        let computeIR = program #split_categories $ do
+                let size = staticDim 2
+                source <- input #source f32 [size]
+                result <- output #result f32 [size]
+                for #i size $ \element ->
+                    block #choose $ do
+                        value <- load source [element]
+                        let dataMatches = compare_ Equal value value
+                            enabled = select dataMatches (boolean True) (boolean False)
+                            chooseElement = compare_ Equal enabled (boolean True)
+                            selectedIndex = select chooseElement (index element) (indexLiteral 0)
+                            isFirst = compare_ Equal selectedIndex (indexLiteral 0)
+                        store result [element] (select isFirst 1 0)
+            generated = generateC computeIR
+        cSourceText generated
+            `shouldBe` unlines
+                [ "#include <math.h>"
+                , "#include <stdbool.h>"
+                , "#include <stddef.h>"
+                , ""
+                , "#pragma STDC FP_CONTRACT OFF"
+                , ""
+                , "void split_categories(const float* input0, float* output0) {"
+                , "    for (size_t loop0 = 0; loop0 < 2; ++loop0) {"
+                , "        float scalar0 = input0[loop0];"
+                , "        bool scalar1 = (scalar0 == scalar0);"
+                , "        bool scalar2 = true;"
+                , "        bool scalar3 = false;"
+                , "        bool scalar4 = (scalar1 ? scalar2 : scalar3);"
+                , "        bool scalar5 = true;"
+                , "        bool scalar6 = (scalar4 == scalar5);"
+                , "        size_t scalar7 = loop0;"
+                , "        size_t scalar8 = 0u;"
+                , "        size_t scalar9 = (scalar6 ? scalar7 : scalar8);"
+                , "        size_t scalar10 = 0u;"
+                , "        bool scalar11 = (scalar9 == scalar10);"
+                , "        float scalar12 = 1.0f;"
+                , "        float scalar13 = 0.0f;"
+                , "        float scalar14 = (scalar11 ? scalar12 : scalar13);"
+                , "        output0[loop0] = scalar14;"
+                , "    }"
+                , "}"
+                ]
+
     it "guards the tail of a dynamically sized split loop in C" $ do
         let computeIR = program #dynamic_copy $ do
                 size <- dim #size

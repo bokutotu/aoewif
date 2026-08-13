@@ -54,7 +54,7 @@ spec = describe "compute eDSL" $ do
                                                             [ IterationIndex (IndexId 0)
                                                             , IterationIndex (IndexId 1)
                                                             ]
-                                                            (LiteralExpr (F32Literal 0))
+                                                            (DataLiteralExpr 0)
                                                         ]
                                                     )
                                                 )

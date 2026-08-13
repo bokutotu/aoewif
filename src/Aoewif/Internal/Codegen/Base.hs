@@ -8,6 +8,7 @@ module Aoewif.Internal.Codegen.Base (
 
 import qualified Aoewif.Internal.IR               as IR
 import qualified Aoewif.Internal.Kernel.Operation as Kernel
+import qualified Aoewif.Internal.Primitive        as Primitive
 import           Data.Ratio                       (denominator, numerator, (%))
 import           Data.Word                        (Word32)
 import           GHC.Float                        (castFloatToWord32,
@@ -68,8 +69,15 @@ functionDeclaration backend kernelIR =
         IR.InputTensor _  -> True
         IR.OutputTensor _ -> False
     tensorParameter tensor = case IR.tensorKind tensor of
-        IR.InputTensor index -> "const " ++ scalarTypeName (IR.tensorType tensor) ++ "* input" ++ show index
-        IR.OutputTensor index -> scalarTypeName (IR.tensorType tensor) ++ "* output" ++ show index
+        IR.InputTensor index ->
+            "const "
+                ++ dataTypeName (IR.tensorDataType tensor)
+                ++ "* input"
+                ++ show index
+        IR.OutputTensor index ->
+            dataTypeName (IR.tensorDataType tensor)
+                ++ "* output"
+                ++ show index
     symbolParameter symbol = "size_t symbol" ++ show (symbolIndex (IR.symbolId symbol))
 
 loopIRNodes :: Backend -> IR.LoopIR Kernel.KernelBlock -> [SourceNode]
@@ -107,7 +115,7 @@ kernelStatementNodes :: Backend -> Kernel.KernelStatement -> [SourceNode]
 kernelStatementNodes backend statement = case statement of
     Kernel.DefineValue value ->
         [ SourceLine
-            ( scalarTypeName (Kernel.valueType value)
+            ( valueTypeName (Kernel.valueType value)
                 ++ " "
                 ++ scalarName (Kernel.valueId value)
                 ++ " = "
@@ -120,7 +128,8 @@ kernelStatementNodes backend statement = case statement of
 
 scalarOperationExpression :: Backend -> Kernel.ScalarOperation -> String
 scalarOperationExpression backend operation = case operation of
-    Kernel.LiteralOperation literal -> scalarLiteral literal
+    Kernel.DataLiteralOperation value -> dataLiteral value
+    Kernel.PredicateLiteralOperation value -> if value then "true" else "false"
     Kernel.IndexOperation expression -> indexExpression expression
     Kernel.LoadOperation buffer address ->
         bufferName buffer ++ "[" ++ indexExpression address ++ "]"
@@ -192,21 +201,21 @@ loopName (IR.LoopId identifier) = "loop" ++ show identifier
 scalarName :: Kernel.ValueId -> String
 scalarName (Kernel.ValueId identifier) = "scalar" ++ show identifier
 
-scalarTypeName :: IR.DType -> String
-scalarTypeName scalarType = case scalarType of
-    IR.F32Type   -> "float"
-    IR.BoolType  -> "bool"
-    IR.IndexType -> "size_t"
+dataTypeName :: Primitive.DataType -> String
+dataTypeName Primitive.F32Type = "float"
 
-scalarLiteral :: IR.ScalarLiteral -> String
-scalarLiteral literal = case literal of
-    IR.F32Literal value
-        | isNaN value -> "NAN"
-        | isInfinite value && value > 0 -> "INFINITY"
-        | isInfinite value -> "-INFINITY"
-        | otherwise -> rustDebugFloat value ++ "f"
-    IR.BoolLiteral value -> if value then "true" else "false"
-    IR.IndexLiteral value -> show value ++ "u"
+valueTypeName :: Primitive.ValueType -> String
+valueTypeName valueType = case valueType of
+    Primitive.DataValueType dataType -> dataTypeName dataType
+    Primitive.PredicateValueType     -> "bool"
+    Primitive.IndexValueType         -> "size_t"
+
+dataLiteral :: Float -> String
+dataLiteral value
+    | isNaN value = "NAN"
+    | isInfinite value && value > 0 = "INFINITY"
+    | isInfinite value = "-INFINITY"
+    | otherwise = rustDebugFloat value ++ "f"
 
 rustDebugFloat :: Float -> String
 rustDebugFloat value
@@ -315,14 +324,14 @@ roundShortest value
   where
     (quotient, remainder) = quotRem (numerator value) (denominator value)
 
-compareOperator :: IR.ComparePredicate -> String
+compareOperator :: Primitive.ComparePredicate -> String
 compareOperator predicate = case predicate of
-    IR.Equal        -> "=="
-    IR.NotEqual     -> "!="
-    IR.Less         -> "<"
-    IR.LessEqual    -> "<="
-    IR.Greater      -> ">"
-    IR.GreaterEqual -> ">="
+    Primitive.Equal        -> "=="
+    Primitive.NotEqual     -> "!="
+    Primitive.Less         -> "<"
+    Primitive.LessEqual    -> "<="
+    Primitive.Greater      -> ">"
+    Primitive.GreaterEqual -> ">="
 
 symbolIndex :: IR.SymbolId -> Int
 symbolIndex (IR.SymbolId identifier) = identifier

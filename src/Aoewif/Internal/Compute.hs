@@ -8,7 +8,7 @@ module Aoewif.Internal.Compute (
     Output,
     Name (..),
     Dim,
-    DTypeRep,
+    DataTypeRep,
     f32,
     Tensor,
     Index,
@@ -23,8 +23,7 @@ module Aoewif.Internal.Compute (
     BlockId (..),
     DimExpr (..),
     Symbol (..),
-    DType (..),
-    ScalarLiteral (..),
+    DataType (..),
     ComparePredicate (..),
     TensorKind (..),
     TensorDecl (..),
@@ -38,7 +37,9 @@ module Aoewif.Internal.Compute (
     IR (..),
     ComputeIndexExpr (..),
     ComputeValueId (..),
-    ScalarExpr (..),
+    DataExpr (..),
+    PredicateExpr (..),
+    IndexValueExpr (..),
     ReducerKind (..),
     ComputeStatement (..),
     ComputeBlock (..),
@@ -73,23 +74,25 @@ import           Aoewif.Internal.Compute.Operation (ComputeBlock (..),
                                                     ComputeIndexExpr (..),
                                                     ComputeStatement (..),
                                                     ComputeValueId (..),
-                                                    ReducerKind (..),
-                                                    ScalarExpr (..))
+                                                    DataExpr (..),
+                                                    IndexValueExpr (..),
+                                                    PredicateExpr (..),
+                                                    ReducerKind (..))
 import           Aoewif.Internal.IR                (Block (..), BlockId (..),
-                                                    ComparePredicate (..),
-                                                    DType (..), DimExpr (..),
-                                                    IR (..), IndexBinding (..),
+                                                    DimExpr (..), IR (..),
+                                                    IndexBinding (..),
                                                     IndexExpr (..),
                                                     IndexId (..), Loop (..),
                                                     LoopIR (..), LoopId (..),
                                                     Name (..), Predicate (..),
-                                                    ScalarLiteral (..),
                                                     Statement (..), Symbol (..),
                                                     SymbolId (..),
                                                     TensorDecl (..),
                                                     TensorId (..),
                                                     TensorKind (..))
 import qualified Aoewif.Internal.IR                as IR
+import           Aoewif.Internal.Primitive         (ComparePredicate (..),
+                                                    DataType (..))
 import           Data.Word                         (Word64)
 import           Prelude                           hiding (exp, log, maximum,
                                                     minimum)
@@ -102,13 +105,14 @@ data IndexValue
 data Input
 data Output
 
-data DTypeRep element where
-    F32Rep :: DTypeRep F32
+data DataTypeRep element where
+    F32Rep :: DataTypeRep F32
 
-f32 :: DTypeRep F32
+f32 :: DataTypeRep F32
 f32 = F32Rep
 
-newtype Tensor access element = Tensor TensorId
+data Tensor access element where
+    Tensor :: DataTypeRep element -> TensorId -> Tensor access element
 
 type role Tensor nominal nominal
 
@@ -116,7 +120,10 @@ newtype Index scope = Index IndexId
 
 type role Index nominal
 
-newtype Expr scope element = Expression ScalarExpr
+data Expr scope element where
+    DataExpression :: DataExpr -> Expr scope F32
+    PredicateExpression :: PredicateExpr -> Expr scope Boolean
+    IndexValueExpression :: IndexValueExpr -> Expr scope IndexValue
 
 type role Expr representational nominal
 
@@ -208,18 +215,18 @@ dim name = Compute $ \state ->
 staticDim :: Word64 -> Dim
 staticDim = StaticDim
 
-input :: Name -> DTypeRep element -> [Dim] -> Compute scope (Tensor Input element)
-input name dtype shape = declareTensor dtype name shape InputTensor
+input :: Name -> DataTypeRep element -> [Dim] -> Compute scope (Tensor Input element)
+input name dataType shape = declareTensor dataType name shape InputTensor
 
-output :: Name -> DTypeRep element -> [Dim] -> Compute scope (Tensor Output element)
-output name dtype shape = declareTensor dtype name shape OutputTensor
+output :: Name -> DataTypeRep element -> [Dim] -> Compute scope (Tensor Output element)
+output name dataType shape = declareTensor dataType name shape OutputTensor
 
-declareTensor :: DTypeRep element -> Name -> [Dim] -> (Int -> TensorKind) -> Compute scope (Tensor access element)
-declareTensor dtype name shape kind = Compute $ \state ->
+declareTensor :: DataTypeRep element -> Name -> [Dim] -> (Int -> TensorKind) -> Compute scope (Tensor access element)
+declareTensor dataType name shape kind = Compute $ \state ->
     let identifier = TensorId (length (stateTensors state))
         ordinal = length (filter (sameKind . tensorKind) (stateTensors state))
-        tensor = TensorDecl identifier name (dtypeValue dtype) shape (kind ordinal)
-     in ( Tensor identifier
+        tensor = TensorDecl identifier name (dataTypeValue dataType) shape (kind ordinal)
+     in ( Tensor dataType identifier
         , state{stateTensors = stateTensors state ++ [tensor]}
         )
   where
@@ -228,8 +235,8 @@ declareTensor dtype name shape kind = Compute $ \state ->
         (OutputTensor _, OutputTensor _) -> True
         _                                -> False
 
-dtypeValue :: DTypeRep element -> DType
-dtypeValue F32Rep = F32Type
+dataTypeValue :: DataTypeRep element -> DataType
+dataTypeValue F32Rep = F32Type
 
 for :: Name -> Dim -> (Index scope -> Compute scope ()) -> Compute scope ()
 for name extent action = Compute $ \state ->
@@ -269,7 +276,7 @@ block name action = Compute $ \state ->
         )
 
 load :: Tensor access element -> [Index scope] -> BlockM scope (Expr scope element)
-load (Tensor tensorIdentifier) indices = BlockM $ \state ->
+load (Tensor F32Rep tensorIdentifier) indices = BlockM $ \state ->
     let identifier = ComputeValueId (blockStateNextValue state)
         statement =
             Load
@@ -277,7 +284,7 @@ load (Tensor tensorIdentifier) indices = BlockM $ \state ->
                 , statementSource = tensorIdentifier
                 , statementIndices = map indexExpression indices
                 }
-     in ( Expression (ValueExpr identifier)
+     in ( DataExpression (ValueExpr identifier)
         , state
             { blockStateStatements = blockStateStatements state ++ [statement]
             , blockStateNextValue = blockStateNextValue state + 1
@@ -285,22 +292,22 @@ load (Tensor tensorIdentifier) indices = BlockM $ \state ->
         )
 
 store :: Tensor Output element -> [Index scope] -> Expr scope element -> BlockM scope ()
-store (Tensor target) indices value =
+store (Tensor F32Rep target) indices (DataExpression value) =
     appendStatement
         Store
             { statementTarget = target
             , statementIndices = map indexExpression indices
-            , statementValue = scalarValue value
+            , statementValue = value
             }
 
 update :: Reducer element -> Tensor Output element -> [Index scope] -> Expr scope element -> BlockM scope ()
-update (Reducer reducer) (Tensor target) indices value =
+update (Reducer reducer) (Tensor F32Rep target) indices (DataExpression value) =
     appendStatement
         Update
             { statementReducer = reducer
             , statementTarget = target
             , statementIndices = map indexExpression indices
-            , statementValue = scalarValue value
+            , statementValue = value
             }
 
 appendStatement :: ComputeStatement -> BlockM scope ()
@@ -323,46 +330,61 @@ maximumReducer :: Reducer F32
 maximumReducer = Reducer MaxReducer
 
 boolean :: Bool -> Expr scope Boolean
-boolean = Expression . LiteralExpr . BoolLiteral
+boolean = PredicateExpression . PredicateLiteralExpr
 
 index :: Index scope -> Expr scope IndexValue
-index (Index identifier) = Expression (IndexValueExpr identifier)
+index (Index identifier) =
+    IndexValueExpression (ComputeIndexValueExpr (IterationIndex identifier))
 
 indexLiteral :: Word64 -> Expr scope IndexValue
-indexLiteral = Expression . LiteralExpr . IndexLiteral
+indexLiteral =
+    IndexValueExpression . ComputeIndexValueExpr . ConstantComputeIndex
 
 fma :: Expr scope F32 -> Expr scope F32 -> Expr scope F32 -> Expr scope F32
 fma lhs rhs accumulator =
-    Expression (FmaExpr (scalarValue lhs) (scalarValue rhs) (scalarValue accumulator))
+    DataExpression (FmaExpr (dataValue lhs) (dataValue rhs) (dataValue accumulator))
 
 min_ :: Expr scope F32 -> Expr scope F32 -> Expr scope F32
-min_ lhs rhs = Expression (MinExpr (scalarValue lhs) (scalarValue rhs))
+min_ lhs rhs = DataExpression (MinExpr (dataValue lhs) (dataValue rhs))
 
 max_ :: Expr scope F32 -> Expr scope F32 -> Expr scope F32
-max_ lhs rhs = Expression (MaxExpr (scalarValue lhs) (scalarValue rhs))
+max_ lhs rhs = DataExpression (MaxExpr (dataValue lhs) (dataValue rhs))
 
 exp_ :: Expr scope F32 -> Expr scope F32
-exp_ = Expression . ExpExpr . scalarValue
+exp_ = DataExpression . ExpExpr . dataValue
 
 log_ :: Expr scope F32 -> Expr scope F32
-log_ = Expression . LogExpr . scalarValue
+log_ = DataExpression . LogExpr . dataValue
 
 compare_ :: ComparePredicate -> Expr scope element -> Expr scope element -> Expr scope Boolean
-compare_ predicate lhs rhs =
-    Expression (CompareExpr predicate (scalarValue lhs) (scalarValue rhs))
+compare_ predicate (DataExpression lhs) (DataExpression rhs) =
+    PredicateExpression (CompareDataExpr predicate lhs rhs)
+compare_ predicate (PredicateExpression lhs) (PredicateExpression rhs) =
+    PredicateExpression (CompareBooleanExpr predicate lhs rhs)
+compare_ predicate (IndexValueExpression lhs) (IndexValueExpression rhs) =
+    PredicateExpression (CompareIndexExpr predicate lhs rhs)
 
 select :: Expr scope Boolean -> Expr scope element -> Expr scope element -> Expr scope element
-select condition trueValue falseValue =
-    Expression
-        (SelectExpr (scalarValue condition) (scalarValue trueValue) (scalarValue falseValue))
+select (PredicateExpression condition) (DataExpression trueValue) (DataExpression falseValue) =
+    DataExpression (SelectDataExpr condition trueValue falseValue)
+select
+    (PredicateExpression condition)
+    (PredicateExpression trueValue)
+    (PredicateExpression falseValue) =
+        PredicateExpression (SelectPredicateExpr condition trueValue falseValue)
+select
+    (PredicateExpression condition)
+    (IndexValueExpression trueValue)
+    (IndexValueExpression falseValue) =
+        IndexValueExpression (SelectIndexValueExpr condition trueValue falseValue)
 
-scalarValue :: Expr scope element -> ScalarExpr
-scalarValue (Expression value) = value
+dataValue :: Expr scope F32 -> DataExpr
+dataValue (DataExpression value) = value
 
 instance Num (Expr scope F32) where
-    lhs + rhs = Expression (AddExpr (scalarValue lhs) (scalarValue rhs))
-    lhs - rhs = Expression (SubExpr (scalarValue lhs) (scalarValue rhs))
-    lhs * rhs = Expression (MulExpr (scalarValue lhs) (scalarValue rhs))
+    lhs + rhs = DataExpression (AddExpr (dataValue lhs) (dataValue rhs))
+    lhs - rhs = DataExpression (SubExpr (dataValue lhs) (dataValue rhs))
+    lhs * rhs = DataExpression (MulExpr (dataValue lhs) (dataValue rhs))
     negate value = 0 - value
     abs value = max_ value (negate value)
     signum value =
@@ -370,11 +392,11 @@ instance Num (Expr scope F32) where
             (compare_ Greater value 0)
             1
             (select (compare_ Less value 0) (-1) 0)
-    fromInteger = Expression . LiteralExpr . F32Literal . fromInteger
+    fromInteger = DataExpression . DataLiteralExpr . fromInteger
 
 instance Fractional (Expr scope F32) where
-    lhs / rhs = Expression (DivExpr (scalarValue lhs) (scalarValue rhs))
-    fromRational = Expression . LiteralExpr . F32Literal . fromRational
+    lhs / rhs = DataExpression (DivExpr (dataValue lhs) (dataValue rhs))
+    fromRational = DataExpression . DataLiteralExpr . fromRational
 
 tensorAt :: TensorId -> IR operation -> TensorDecl
 tensorAt = IR.tensorAt

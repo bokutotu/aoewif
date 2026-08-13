@@ -5,6 +5,7 @@ module Aoewif.Internal.Kernel.Lower (
 import qualified Aoewif.Internal.Compute.Operation as Compute
 import qualified Aoewif.Internal.IR                as IR
 import qualified Aoewif.Internal.Kernel.Operation  as Kernel
+import qualified Aoewif.Internal.Primitive         as Primitive
 import           Data.Maybe                        (fromJust)
 
 data LowerContext = LowerContext
@@ -86,14 +87,16 @@ lowerComputeStatements context (statement : statements) = case statement of
         let tensor = IR.tensorAt source (contextIR context)
             address = flattenAddress (IR.tensorShape tensor) (map (lowerComputeIndex context) indices)
         (loadStatements, value) <-
-            define (IR.tensorType tensor) (Kernel.LoadOperation (tensorBuffer tensor) address)
+            define
+                (Primitive.DataValueType (IR.tensorDataType tensor))
+                (Kernel.LoadOperation (tensorBuffer tensor) address)
         rest <-
             lowerComputeStatements
                 context{contextValues = (result, value) : contextValues context}
                 statements
         pure (loadStatements ++ rest)
     Compute.Store target indices value -> do
-        (valueStatements, result) <- lowerScalar context value
+        (valueStatements, result) <- lowerData context value
         rest <- lowerComputeStatements context statements
         pure (valueStatements ++ [Kernel.StoreBuffer targetBuffer address result] ++ rest)
       where
@@ -101,11 +104,11 @@ lowerComputeStatements context (statement : statements) = case statement of
         targetBuffer = tensorBuffer tensor
         address = flattenAddress (IR.tensorShape tensor) (map (lowerComputeIndex context) indices)
     Compute.Update reducer target indices value -> do
-        (valueStatements, valueResult) <- lowerScalar context value
+        (valueStatements, valueResult) <- lowerData context value
         (loadStatements, currentValue) <-
-            define IR.F32Type (Kernel.LoadOperation targetBuffer address)
+            define tensorValueType (Kernel.LoadOperation targetBuffer address)
         (reducerStatements, reducedValue) <-
-            define IR.F32Type (reducerOperation reducer currentValue valueResult)
+            define tensorValueType (reducerOperation reducer currentValue valueResult)
         rest <- lowerComputeStatements context statements
         pure
             ( valueStatements
@@ -118,73 +121,119 @@ lowerComputeStatements context (statement : statements) = case statement of
         tensor = IR.tensorAt target (contextIR context)
         targetBuffer = tensorBuffer tensor
         address = flattenAddress (IR.tensorShape tensor) (map (lowerComputeIndex context) indices)
+        tensorValueType = Primitive.DataValueType (IR.tensorDataType tensor)
 
-lowerScalar :: LowerContext -> Compute.ScalarExpr -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
-lowerScalar context expression = case expression of
-    Compute.LiteralExpr literal ->
-        define (IR.scalarLiteralType literal) (Kernel.LiteralOperation literal)
-    Compute.IndexValueExpr identifier ->
-        define IR.IndexType (Kernel.IndexOperation (indexValue context identifier))
+lowerData :: LowerContext -> Compute.DataExpr -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
+lowerData context expression = case expression of
+    Compute.DataLiteralExpr value ->
+        define f32ValueType (Kernel.DataLiteralOperation value)
     Compute.ValueExpr identifier -> pure ([], computeValue context identifier)
-    Compute.AddExpr lhs rhs -> lowerBinary context Kernel.AddOperation lhs rhs
-    Compute.SubExpr lhs rhs -> lowerBinary context Kernel.SubOperation lhs rhs
-    Compute.MulExpr lhs rhs -> lowerBinary context Kernel.MulOperation lhs rhs
-    Compute.DivExpr lhs rhs -> lowerBinary context Kernel.DivOperation lhs rhs
+    Compute.AddExpr lhs rhs -> lowerDataBinary context Kernel.AddOperation lhs rhs
+    Compute.SubExpr lhs rhs -> lowerDataBinary context Kernel.SubOperation lhs rhs
+    Compute.MulExpr lhs rhs -> lowerDataBinary context Kernel.MulOperation lhs rhs
+    Compute.DivExpr lhs rhs -> lowerDataBinary context Kernel.DivOperation lhs rhs
     Compute.FmaExpr lhs rhs accumulator -> do
-        (lhsStatements, lhsValue) <- lowerScalar context lhs
-        (rhsStatements, rhsValue) <- lowerScalar context rhs
-        (accumulatorStatements, accumulatorValue) <- lowerScalar context accumulator
+        (lhsStatements, lhsValue) <- lowerData context lhs
+        (rhsStatements, rhsValue) <- lowerData context rhs
+        (accumulatorStatements, accumulatorValue) <- lowerData context accumulator
         (operationStatements, result) <-
-            define IR.F32Type (Kernel.FmaOperation lhsValue rhsValue accumulatorValue)
+            define f32ValueType (Kernel.FmaOperation lhsValue rhsValue accumulatorValue)
         pure
             ( lhsStatements ++ rhsStatements ++ accumulatorStatements ++ operationStatements
             , result
             )
-    Compute.MinExpr lhs rhs -> lowerBinary context Kernel.MinOperation lhs rhs
-    Compute.MaxExpr lhs rhs -> lowerBinary context Kernel.MaxOperation lhs rhs
-    Compute.ExpExpr value -> lowerUnary context Kernel.ExpOperation value
-    Compute.LogExpr value -> lowerUnary context Kernel.LogOperation value
-    Compute.CompareExpr predicate lhs rhs -> do
-        (lhsStatements, lhsValue) <- lowerScalar context lhs
-        (rhsStatements, rhsValue) <- lowerScalar context rhs
-        (operationStatements, result) <-
-            define IR.BoolType (Kernel.CompareOperation predicate lhsValue rhsValue)
-        pure (lhsStatements ++ rhsStatements ++ operationStatements, result)
-    Compute.SelectExpr condition trueValue falseValue -> do
-        (conditionStatements, conditionValue) <- lowerScalar context condition
-        (trueStatements, loweredTrueValue) <- lowerScalar context trueValue
-        (falseStatements, loweredFalseValue) <- lowerScalar context falseValue
+    Compute.MinExpr lhs rhs -> lowerDataBinary context Kernel.MinOperation lhs rhs
+    Compute.MaxExpr lhs rhs -> lowerDataBinary context Kernel.MaxOperation lhs rhs
+    Compute.ExpExpr value -> lowerDataUnary context Kernel.ExpOperation value
+    Compute.LogExpr value -> lowerDataUnary context Kernel.LogOperation value
+    Compute.SelectDataExpr condition trueValue falseValue -> do
+        (conditionStatements, conditionValue) <- lowerPredicate context condition
+        (trueStatements, loweredTrueValue) <- lowerData context trueValue
+        (falseStatements, loweredFalseValue) <- lowerData context falseValue
         (operationStatements, result) <-
             define
-                (Compute.exprType trueValue)
+                f32ValueType
                 (Kernel.SelectOperation conditionValue loweredTrueValue loweredFalseValue)
         pure
             ( conditionStatements ++ trueStatements ++ falseStatements ++ operationStatements
             , result
             )
 
-lowerBinary :: LowerContext -> (Kernel.ValueId -> Kernel.ValueId -> Kernel.ScalarOperation) -> Compute.ScalarExpr -> Compute.ScalarExpr -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
-lowerBinary context constructor lhs rhs = do
-    (lhsStatements, lhsValue) <- lowerScalar context lhs
-    (rhsStatements, rhsValue) <- lowerScalar context rhs
+lowerPredicate :: LowerContext -> Compute.PredicateExpr -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
+lowerPredicate context expression = case expression of
+    Compute.PredicateLiteralExpr value ->
+        define Primitive.PredicateValueType (Kernel.PredicateLiteralOperation value)
+    Compute.CompareDataExpr predicate lhs rhs ->
+        lowerComparison (lowerData context) predicate lhs rhs
+    Compute.CompareBooleanExpr predicate lhs rhs ->
+        lowerComparison (lowerPredicate context) predicate lhs rhs
+    Compute.CompareIndexExpr predicate lhs rhs ->
+        lowerComparison (lowerIndexValue context) predicate lhs rhs
+    Compute.SelectPredicateExpr condition trueValue falseValue -> do
+        (conditionStatements, conditionValue) <- lowerPredicate context condition
+        (trueStatements, loweredTrueValue) <- lowerPredicate context trueValue
+        (falseStatements, loweredFalseValue) <- lowerPredicate context falseValue
+        (operationStatements, result) <-
+            define
+                Primitive.PredicateValueType
+                (Kernel.SelectOperation conditionValue loweredTrueValue loweredFalseValue)
+        pure
+            ( conditionStatements ++ trueStatements ++ falseStatements ++ operationStatements
+            , result
+            )
+
+lowerIndexValue :: LowerContext -> Compute.IndexValueExpr -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
+lowerIndexValue context expression = case expression of
+    Compute.ComputeIndexValueExpr indexExpression ->
+        define
+            Primitive.IndexValueType
+            (Kernel.IndexOperation (lowerComputeIndex context indexExpression))
+    Compute.SelectIndexValueExpr condition trueValue falseValue -> do
+        (conditionStatements, conditionValue) <- lowerPredicate context condition
+        (trueStatements, loweredTrueValue) <- lowerIndexValue context trueValue
+        (falseStatements, loweredFalseValue) <- lowerIndexValue context falseValue
+        (operationStatements, result) <-
+            define
+                Primitive.IndexValueType
+                (Kernel.SelectOperation conditionValue loweredTrueValue loweredFalseValue)
+        pure
+            ( conditionStatements ++ trueStatements ++ falseStatements ++ operationStatements
+            , result
+            )
+
+lowerComparison :: (expression -> Lower ([Kernel.KernelStatement], Kernel.ValueId)) -> Primitive.ComparePredicate -> expression -> expression -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
+lowerComparison lowerValue predicate lhs rhs = do
+    (lhsStatements, lhsValue) <- lowerValue lhs
+    (rhsStatements, rhsValue) <- lowerValue rhs
     (operationStatements, result) <-
-        define IR.F32Type (constructor lhsValue rhsValue)
+        define Primitive.PredicateValueType (Kernel.CompareOperation predicate lhsValue rhsValue)
     pure (lhsStatements ++ rhsStatements ++ operationStatements, result)
 
-lowerUnary :: LowerContext -> (Kernel.ValueId -> Kernel.ScalarOperation) -> Compute.ScalarExpr -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
-lowerUnary context constructor value = do
-    (valueStatements, valueResult) <- lowerScalar context value
+lowerDataBinary :: LowerContext -> (Kernel.ValueId -> Kernel.ValueId -> Kernel.ScalarOperation) -> Compute.DataExpr -> Compute.DataExpr -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
+lowerDataBinary context constructor lhs rhs = do
+    (lhsStatements, lhsValue) <- lowerData context lhs
+    (rhsStatements, rhsValue) <- lowerData context rhs
     (operationStatements, result) <-
-        define IR.F32Type (constructor valueResult)
+        define f32ValueType (constructor lhsValue rhsValue)
+    pure (lhsStatements ++ rhsStatements ++ operationStatements, result)
+
+lowerDataUnary :: LowerContext -> (Kernel.ValueId -> Kernel.ScalarOperation) -> Compute.DataExpr -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
+lowerDataUnary context constructor value = do
+    (valueStatements, valueResult) <- lowerData context value
+    (operationStatements, result) <-
+        define f32ValueType (constructor valueResult)
     pure (valueStatements ++ operationStatements, result)
 
-define :: IR.DType -> Kernel.ScalarOperation -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
-define scalarType operation = Lower $ \state ->
+define :: Primitive.ValueType -> Kernel.ScalarOperation -> Lower ([Kernel.KernelStatement], Kernel.ValueId)
+define valueType operation = Lower $ \state ->
     let identifier = Kernel.ValueId (stateNextValue state)
-        value = Kernel.Value identifier scalarType operation
+        value = Kernel.Value identifier valueType operation
      in ( ([Kernel.DefineValue value], identifier)
         , state{stateNextValue = stateNextValue state + 1}
         )
+
+f32ValueType :: Primitive.ValueType
+f32ValueType = Primitive.DataValueType Primitive.F32Type
 
 reducerOperation :: Compute.ReducerKind -> Kernel.ValueId -> Kernel.ValueId -> Kernel.ScalarOperation
 reducerOperation reducer = case reducer of

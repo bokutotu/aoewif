@@ -7,7 +7,8 @@ module Aoewif.Internal.Kernel.Operation (
     KernelBlock (..),
 ) where
 
-import           Aoewif.Internal.IR
+import           Aoewif.Internal.IR        (IndexExpr)
+import           Aoewif.Internal.Primitive (ComparePredicate, ValueType)
 
 newtype ValueId = ValueId Int
     deriving stock (Eq, Ord, Show)
@@ -18,7 +19,8 @@ data Buffer
     deriving stock (Eq, Ord, Show)
 
 data ScalarOperation
-    = LiteralOperation ScalarLiteral
+    = DataLiteralOperation Float
+    | PredicateLiteralOperation Bool
     | IndexOperation IndexExpr
     | LoadOperation Buffer IndexExpr
     | AddOperation ValueId ValueId
@@ -36,7 +38,7 @@ data ScalarOperation
 
 data Value = Value
     { valueId        :: ValueId
-    , valueType      :: DType
+    , valueType      :: ValueType
     , valueOperation :: ScalarOperation
     }
     deriving stock (Eq, Show)

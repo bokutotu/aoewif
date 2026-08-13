@@ -7,10 +7,6 @@ module Aoewif.Internal.IR (
     BlockId (..),
     DimExpr (..),
     Symbol (..),
-    DType (..),
-    ScalarLiteral (..),
-    scalarLiteralType,
-    ComparePredicate (..),
     TensorKind (..),
     TensorDecl (..),
     IndexExpr (..),
@@ -24,12 +20,13 @@ module Aoewif.Internal.IR (
     tensorAt,
 ) where
 
-import           Data.List            (find)
-import           Data.Maybe           (fromJust)
-import           Data.Proxy           (Proxy (..))
-import           Data.Word            (Word64)
-import           GHC.OverloadedLabels (IsLabel (..))
-import           GHC.TypeLits         (KnownSymbol, symbolVal)
+import           Aoewif.Internal.Primitive (DataType)
+import           Data.List                 (find)
+import           Data.Maybe                (fromJust)
+import           Data.Proxy                (Proxy (..))
+import           Data.Word                 (Word64)
+import           GHC.OverloadedLabels      (IsLabel (..))
+import           GHC.TypeLits              (KnownSymbol, symbolVal)
 
 newtype Name = Name String
     deriving stock (Eq, Ord, Show)
@@ -64,44 +61,17 @@ data Symbol = Symbol
     }
     deriving stock (Eq, Show)
 
-data DType
-    = F32Type
-    | BoolType
-    | IndexType
-    deriving stock (Eq, Show)
-
-data ScalarLiteral
-    = F32Literal Float
-    | BoolLiteral Bool
-    | IndexLiteral Word64
-    deriving stock (Eq, Show)
-
-scalarLiteralType :: ScalarLiteral -> DType
-scalarLiteralType literal = case literal of
-    F32Literal _   -> F32Type
-    BoolLiteral _  -> BoolType
-    IndexLiteral _ -> IndexType
-
-data ComparePredicate
-    = Equal
-    | NotEqual
-    | Less
-    | LessEqual
-    | Greater
-    | GreaterEqual
-    deriving stock (Eq, Show)
-
 data TensorKind
     = InputTensor Int
     | OutputTensor Int
     deriving stock (Eq, Show)
 
 data TensorDecl = TensorDecl
-    { tensorId    :: TensorId
-    , tensorName  :: Name
-    , tensorType  :: DType
-    , tensorShape :: [DimExpr]
-    , tensorKind  :: TensorKind
+    { tensorId       :: TensorId
+    , tensorName     :: Name
+    , tensorDataType :: DataType
+    , tensorShape    :: [DimExpr]
+    , tensorKind     :: TensorKind
     }
     deriving stock (Eq, Show)
 
