@@ -35,6 +35,8 @@ library:
     - Aoewif.Internal.Kernel.Operation
     - Aoewif.Internal.Primitive
     - Aoewif.Internal.Schedule.Builder
+    - Aoewif.Internal.Schedule.Reorder
+    - Aoewif.Internal.Schedule.Split
 
 tests:
   aoewif-test:

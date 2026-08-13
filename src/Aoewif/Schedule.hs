@@ -9,4 +9,7 @@ module Aoewif.Schedule (
     reorder,
 ) where
 
-import           Aoewif.Internal.Schedule.Builder
+import           Aoewif.Internal.Schedule.Builder (Block, Loop, Schedule, block,
+                                                   loopOf, schedule)
+import           Aoewif.Internal.Schedule.Reorder (reorder)
+import           Aoewif.Internal.Schedule.Split   (split)
