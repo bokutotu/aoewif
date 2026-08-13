@@ -22,19 +22,18 @@ library:
   exposed-modules:
     - Aoewif.Codegen
     - Aoewif.Compute
+    - Aoewif.IR
     - Aoewif.Schedule
   other-modules:
     - Aoewif.Internal.Codegen.Base
     - Aoewif.Internal.Codegen.Cpu
     - Aoewif.Internal.Codegen.Cuda
     - Aoewif.Internal.Compute
-    - Aoewif.Internal.Compute.IR
-    - Aoewif.Internal.Kernel.IR
+    - Aoewif.Internal.Compute.Operation
+    - Aoewif.Internal.IR
     - Aoewif.Internal.Kernel.Lower
+    - Aoewif.Internal.Kernel.Operation
     - Aoewif.Internal.Schedule.Builder
-    - Aoewif.Internal.Schedule.Cpu
-    - Aoewif.Internal.Schedule.Cuda
-    - Aoewif.Internal.Schedule.IR
 
 tests:
   aoewif-test:

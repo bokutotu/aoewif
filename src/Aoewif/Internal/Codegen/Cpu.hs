@@ -5,10 +5,13 @@ module Aoewif.Internal.Codegen.Cpu (
     generateC,
 ) where
 
-import           Aoewif.Internal.Codegen.Base     (Backend (..), generateSource,
-                                                   generatedName, generatedText)
-import qualified Aoewif.Internal.Kernel.Lower     as Kernel
-import qualified Aoewif.Internal.Schedule.Builder as Builder
+import           Aoewif.Internal.Codegen.Base      (Backend (..),
+                                                    generateSource,
+                                                    generatedName,
+                                                    generatedText)
+import qualified Aoewif.Internal.Compute.Operation as Compute
+import qualified Aoewif.Internal.IR                as IR
+import qualified Aoewif.Internal.Kernel.Lower      as Kernel
 
 data CSource = CSource String String
     deriving stock (Eq, Show)
@@ -19,9 +22,9 @@ cSourceText (CSource sourceText _) = sourceText
 cFunctionName :: CSource -> String
 cFunctionName (CSource _ functionName) = functionName
 
-generateC :: Builder.CpuSchedule -> CSource
-generateC schedule =
-    let generated = generateSource cpuBackend (Kernel.lowerCpuSchedule schedule)
+generateC :: IR.IR Compute.ComputeBlock -> CSource
+generateC computeIR =
+    let generated = generateSource cpuBackend (Kernel.lower computeIR)
      in CSource (generatedText generated) (generatedName generated)
 
 cpuBackend :: Backend
@@ -36,8 +39,6 @@ cpuBackend =
             , ""
             ]
         , backendFunctionPrefix = "void "
-        , backendParallelDirective = Just "#pragma omp parallel for"
-        , backendUnrollDirective = \factor -> "#pragma GCC unroll " ++ show factor
         , backendAddExpression = infixExpression " + "
         , backendSubExpression = infixExpression " - "
         , backendMulExpression = infixExpression " * "

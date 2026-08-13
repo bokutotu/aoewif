@@ -7,7 +7,7 @@ import           Test.Hspec
 
 spec :: Spec
 spec = describe "compute eDSL" $ do
-    it "elaborates matrix multiplication to a first-order reduction definition" $ do
+    it "builds an explicit matrix multiplication loop nest" $ do
         let rows = staticDim 4
             columns = staticDim 8
             inner = staticDim 16
@@ -15,107 +15,167 @@ spec = describe "compute eDSL" $ do
                 left <- input #left f32 [rows, inner]
                 right <- input #right f32 [inner, columns]
                 result <- output #result f32 [rows, columns]
-                block #matmul $ do
-                    row <- spatial #m rows
-                    column <- spatial #n columns
-                    reductionAxis <- reduction #k inner
-                    define result [row, column] $
-                        reduce add 0 [reductionAxis] $
-                            left ! [row, reductionAxis] * right ! [reductionAxis, column]
+                for #m rows $ \row ->
+                    for #n columns $ \column -> do
+                        block #initialize $ do
+                            store result [row, column] 0
+                        for #k inner $ \reductionIndex ->
+                            block #update $ do
+                                lhs <- load left [row, reductionIndex]
+                                rhs <- load right [reductionIndex, column]
+                                update add result [row, column] (lhs * rhs)
             expected =
-                ComputeIR
-                    { computeName = #matmul
-                    , computeSymbols = []
-                    , computeTensors =
+                IR
+                    { irName = #matmul
+                    , irSymbols = []
+                    , irTensors =
                         [ TensorDecl (TensorId 0) #left F32Type [rows, inner] (InputTensor 0)
                         , TensorDecl (TensorId 1) #right F32Type [inner, columns] (InputTensor 1)
                         , TensorDecl (TensorId 2) #result F32Type [rows, columns] (OutputTensor 0)
                         ]
-                    , computeBlocks =
-                        [ ComputeBlock
-                            { blockId = BlockId 0
-                            , blockName = #matmul
-                            , blockAxes =
-                                [ AxisDecl (AxisId 0) #m Spatial (StaticDim 0) rows
-                                , AxisDecl (AxisId 1) #n Spatial (StaticDim 0) columns
-                                , AxisDecl (AxisId 2) #k Reduction (StaticDim 0) inner
-                                ]
-                            , blockDefinitions =
-                                [ ReductionDef
-                                    { definitionTarget = TensorId 2
-                                    , definitionIndices = [AxisIndex (AxisId 0), AxisIndex (AxisId 1)]
-                                    , definitionReducer = AddReducer
-                                    , definitionIdentity = LiteralExpr (F32Literal 0)
-                                    , definitionReduceAxes = [AxisId 2]
-                                    , definitionValue =
-                                        MulExpr
-                                            (LoadExpr (TensorId 0) [AxisIndex (AxisId 0), AxisIndex (AxisId 2)])
-                                            (LoadExpr (TensorId 1) [AxisIndex (AxisId 2), AxisIndex (AxisId 1)])
-                                    }
-                                ]
-                            }
-                        ]
+                    , irBody =
+                        LoopIR
+                            [ For
+                                (Loop (LoopId 0) #m (StaticDim 0) rows)
+                                ( LoopIR
+                                    [ For
+                                        (Loop (LoopId 1) #n (StaticDim 0) columns)
+                                        ( LoopIR
+                                            [ Execute
+                                                ( Block
+                                                    (BlockId 0)
+                                                    #initialize
+                                                    [ IndexBinding (IndexId 0) (LoopIndex (LoopId 0))
+                                                    , IndexBinding (IndexId 1) (LoopIndex (LoopId 1))
+                                                    ]
+                                                    ( ComputeBlock
+                                                        [ Store
+                                                            (TensorId 2)
+                                                            [ IterationIndex (IndexId 0)
+                                                            , IterationIndex (IndexId 1)
+                                                            ]
+                                                            (LiteralExpr (F32Literal 0))
+                                                        ]
+                                                    )
+                                                )
+                                            , For
+                                                (Loop (LoopId 2) #k (StaticDim 0) inner)
+                                                ( LoopIR
+                                                    [ Execute
+                                                        ( Block
+                                                            (BlockId 1)
+                                                            #update
+                                                            [ IndexBinding (IndexId 0) (LoopIndex (LoopId 0))
+                                                            , IndexBinding (IndexId 1) (LoopIndex (LoopId 1))
+                                                            , IndexBinding (IndexId 2) (LoopIndex (LoopId 2))
+                                                            ]
+                                                            ( ComputeBlock
+                                                                [ Load
+                                                                    (ComputeValueId 0)
+                                                                    (TensorId 0)
+                                                                    [ IterationIndex (IndexId 0)
+                                                                    , IterationIndex (IndexId 2)
+                                                                    ]
+                                                                , Load
+                                                                    (ComputeValueId 1)
+                                                                    (TensorId 1)
+                                                                    [ IterationIndex (IndexId 2)
+                                                                    , IterationIndex (IndexId 1)
+                                                                    ]
+                                                                , Update
+                                                                    AddReducer
+                                                                    (TensorId 2)
+                                                                    [ IterationIndex (IndexId 0)
+                                                                    , IterationIndex (IndexId 1)
+                                                                    ]
+                                                                    ( MulExpr
+                                                                        (ValueExpr (ComputeValueId 0))
+                                                                        (ValueExpr (ComputeValueId 1))
+                                                                    )
+                                                                ]
+                                                            )
+                                                        )
+                                                    ]
+                                                )
+                                            ]
+                                        )
+                                    ]
+                                )
+                            ]
                     }
         actual `shouldBe` expected
 
-    it "elaborates ReLU to a pointwise definition" $ do
+    it "keeps block statements in declaration order" $ do
         let size = staticDim 32
-            actual = program #relu $ do
-                source <- input #source f32 [size]
+            actual = program #orderedBlock $ do
+                left <- input #left f32 [size]
+                right <- input #right f32 [size]
                 result <- output #result f32 [size]
-                block #relu $ do
-                    element <- spatial #i size
-                    define result [element] (max_ 0 (source ! [element]))
+                for #element size $ \element ->
+                    block #operations $ do
+                        lhs <- load left [element]
+                        rhs <- load right [element]
+                        store result [element] lhs
+                        update add result [element] rhs
+                        store result [element] (lhs + rhs)
+                        update multiply result [element] (lhs * rhs)
             expected =
-                ComputeIR
-                    { computeName = #relu
-                    , computeSymbols = []
-                    , computeTensors =
-                        [ TensorDecl (TensorId 0) #source F32Type [size] (InputTensor 0)
-                        , TensorDecl (TensorId 1) #result F32Type [size] (OutputTensor 0)
+                IR
+                    { irName = #orderedBlock
+                    , irSymbols = []
+                    , irTensors =
+                        [ TensorDecl (TensorId 0) #left F32Type [size] (InputTensor 0)
+                        , TensorDecl (TensorId 1) #right F32Type [size] (InputTensor 1)
+                        , TensorDecl (TensorId 2) #result F32Type [size] (OutputTensor 0)
                         ]
-                    , computeBlocks =
-                        [ ComputeBlock
-                            { blockId = BlockId 0
-                            , blockName = #relu
-                            , blockAxes = [AxisDecl (AxisId 0) #i Spatial (StaticDim 0) size]
-                            , blockDefinitions =
-                                [ PointwiseDef
-                                    { definitionTarget = TensorId 1
-                                    , definitionIndices = [AxisIndex (AxisId 0)]
-                                    , definitionValue =
-                                        MaxExpr
-                                            (LiteralExpr (F32Literal 0))
-                                            (LoadExpr (TensorId 0) [AxisIndex (AxisId 0)])
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-        actual `shouldBe` expected
-
-    it "keeps declaration order separate from loop semantics" $ do
-        let actual = program #copy $ do
-                size <- dim #size
-                source <- input #source f32 [size]
-                result <- output #result f32 [size]
-                block #copy $ do
-                    element <- spatial #element size
-                    define result [element] (source ! [element])
-            expected =
-                ComputeIR
-                    { computeName = #copy
-                    , computeSymbols = [Symbol (SymbolId 0) #size]
-                    , computeTensors =
-                        [ TensorDecl (TensorId 0) #source F32Type [SymbolDim (SymbolId 0)] (InputTensor 0)
-                        , TensorDecl (TensorId 1) #result F32Type [SymbolDim (SymbolId 0)] (OutputTensor 0)
-                        ]
-                    , computeBlocks =
-                        [ ComputeBlock
-                            (BlockId 0)
-                            #copy
-                            [AxisDecl (AxisId 0) #element Spatial (StaticDim 0) (SymbolDim (SymbolId 0))]
-                            [PointwiseDef (TensorId 1) [AxisIndex (AxisId 0)] (LoadExpr (TensorId 0) [AxisIndex (AxisId 0)])]
-                        ]
+                    , irBody =
+                        LoopIR
+                            [ For
+                                (Loop (LoopId 0) #element (StaticDim 0) size)
+                                ( LoopIR
+                                    [ Execute
+                                        ( Block
+                                            (BlockId 0)
+                                            #operations
+                                            [IndexBinding (IndexId 0) (LoopIndex (LoopId 0))]
+                                            ( ComputeBlock
+                                                [ Load
+                                                    (ComputeValueId 0)
+                                                    (TensorId 0)
+                                                    [IterationIndex (IndexId 0)]
+                                                , Load
+                                                    (ComputeValueId 1)
+                                                    (TensorId 1)
+                                                    [IterationIndex (IndexId 0)]
+                                                , Store
+                                                    (TensorId 2)
+                                                    [IterationIndex (IndexId 0)]
+                                                    (ValueExpr (ComputeValueId 0))
+                                                , Update
+                                                    AddReducer
+                                                    (TensorId 2)
+                                                    [IterationIndex (IndexId 0)]
+                                                    (ValueExpr (ComputeValueId 1))
+                                                , Store
+                                                    (TensorId 2)
+                                                    [IterationIndex (IndexId 0)]
+                                                    ( AddExpr
+                                                        (ValueExpr (ComputeValueId 0))
+                                                        (ValueExpr (ComputeValueId 1))
+                                                    )
+                                                , Update
+                                                    MulReducer
+                                                    (TensorId 2)
+                                                    [IterationIndex (IndexId 0)]
+                                                    ( MulExpr
+                                                        (ValueExpr (ComputeValueId 0))
+                                                        (ValueExpr (ComputeValueId 1))
+                                                    )
+                                                ]
+                                            )
+                                        )
+                                    ]
+                                )
+                            ]
                     }
         actual `shouldBe` expected

@@ -1,0 +1,25 @@
+module Aoewif.IR (
+    Name (..),
+    SymbolId (..),
+    TensorId (..),
+    IndexId (..),
+    LoopId (..),
+    BlockId (..),
+    DimExpr (..),
+    Symbol (..),
+    DType (..),
+    ScalarLiteral (..),
+    ComparePredicate (..),
+    TensorKind (..),
+    TensorDecl (..),
+    IndexExpr (..),
+    Predicate (..),
+    IndexBinding (..),
+    Loop (..),
+    Block (..),
+    Statement (..),
+    LoopIR (..),
+    IR (..),
+) where
+
+import           Aoewif.Internal.IR

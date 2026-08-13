@@ -5,10 +5,13 @@ module Aoewif.Internal.Codegen.Cuda (
     generateCuda,
 ) where
 
-import           Aoewif.Internal.Codegen.Base     (Backend (..), generateSource,
-                                                   generatedName, generatedText)
-import qualified Aoewif.Internal.Kernel.Lower     as Kernel
-import qualified Aoewif.Internal.Schedule.Builder as Builder
+import           Aoewif.Internal.Codegen.Base      (Backend (..),
+                                                    generateSource,
+                                                    generatedName,
+                                                    generatedText)
+import qualified Aoewif.Internal.Compute.Operation as Compute
+import qualified Aoewif.Internal.IR                as IR
+import qualified Aoewif.Internal.Kernel.Lower      as Kernel
 
 data CudaSource = CudaSource String String
     deriving stock (Eq, Show)
@@ -19,9 +22,9 @@ cudaSourceText (CudaSource sourceText _) = sourceText
 cudaKernelName :: CudaSource -> String
 cudaKernelName (CudaSource _ kernelName) = kernelName
 
-generateCuda :: Builder.CudaSchedule -> CudaSource
-generateCuda schedule =
-    let generated = generateSource cudaBackend (Kernel.lowerCudaSchedule schedule)
+generateCuda :: IR.IR Compute.ComputeBlock -> CudaSource
+generateCuda computeIR =
+    let generated = generateSource cudaBackend (Kernel.lower computeIR)
      in CudaSource (generatedText generated) (generatedName generated)
 
 cudaBackend :: Backend
@@ -35,8 +38,6 @@ cudaBackend =
             , ""
             ]
         , backendFunctionPrefix = "__global__ void "
-        , backendParallelDirective = Nothing
-        , backendUnrollDirective = \factor -> "#pragma unroll " ++ show factor
         , backendAddExpression = function2 "__fadd_rn"
         , backendSubExpression = function2 "__fsub_rn"
         , backendMulExpression = function2 "__fmul_rn"
