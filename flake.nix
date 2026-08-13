@@ -168,6 +168,19 @@
               entry = "${haskellFormat}/bin/fourmolu-then-stylish-haskell";
               files = "\\.l?hs(-boot)?$";
               before = [
+                "hlint"
+                "test"
+                "weeder"
+              ];
+            };
+            hlint = {
+              enable = true;
+              name = "hlint";
+              description = "Lint Haskell sources.";
+              package = pkgs.hlint;
+              entry = "${pkgs.hlint}/bin/hlint";
+              files = "\\.l?hs(-boot)?$";
+              before = [
                 "test"
                 "weeder"
               ];
