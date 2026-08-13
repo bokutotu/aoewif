@@ -28,8 +28,10 @@ library:
     - Aoewif.Internal.Codegen.Base
     - Aoewif.Internal.Codegen.Cpu
     - Aoewif.Internal.Codegen.Cuda
-    - Aoewif.Internal.Compute
+    - Aoewif.Internal.Compute.Block
+    - Aoewif.Internal.Compute.Math
     - Aoewif.Internal.Compute.Operation
+    - Aoewif.Internal.Compute.State
     - Aoewif.Internal.IR
     - Aoewif.Internal.Kernel.Lower
     - Aoewif.Internal.Kernel.Operation

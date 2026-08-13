@@ -5,7 +5,6 @@ module Aoewif.Compute (
     Input,
     Output,
     Name (..),
-    Dim,
     DataTypeRep,
     f32,
     Tensor,
@@ -68,4 +67,10 @@ module Aoewif.Compute (
     select,
 ) where
 
-import           Aoewif.Internal.Compute
+import           Aoewif.Internal.Compute.Block
+import           Aoewif.Internal.Compute.Math
+import           Aoewif.Internal.Compute.Operation
+import           Aoewif.Internal.Compute.State
+import           Aoewif.Internal.IR
+import           Aoewif.Internal.Primitive         (ComparePredicate (..),
+                                                    DataType (..))
