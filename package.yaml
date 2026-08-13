@@ -4,8 +4,8 @@ name: aoewif
 version: 0.1.0
 synopsis: Tensor IR scheduling and C/CUDA source generation
 description: |
-  A base-only tensor compute IR with CPU and CUDA scheduling,
-  validation, and deterministic C and CUDA source generation.
+  A typed tensor compute eDSL with scoped CPU and CUDA scheduling
+  and deterministic C and CUDA source generation.
 category: Compilers
 license: NONE
 github: bokutotu/aoewif
@@ -19,6 +19,19 @@ ghc-options:
 
 library:
   source-dirs: src
+  exposed-modules:
+    - Aoewif
+    - Aoewif.Codegen
+    - Aoewif.Compute
+    - Aoewif.Schedule
+  other-modules:
+    - Aoewif.Internal.Compute
+    - Aoewif.Internal.IR
+    - Aoewif.Internal.Schedule.Base
+    - Aoewif.Internal.Schedule.Builder
+    - Aoewif.Internal.Schedule.Core
+    - Aoewif.Internal.Schedule.Cpu
+    - Aoewif.Internal.Schedule.Cuda
 
 tests:
   aoewif-test:

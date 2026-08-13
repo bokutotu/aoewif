@@ -121,6 +121,19 @@
               stylish-haskell --inplace "$@"
             '';
           };
+          testCheck = pkgs.writeShellApplication {
+            name = "test-check";
+            runtimeInputs = [
+              ghc
+              pkgs.cabal-install
+              pkgs.haskellPackages.hpack
+            ];
+            text = ''
+              export CABAL_CONFIG=${cabalConfig}
+              hpack
+              cabal test --offline
+            '';
+          };
           weederCheck = pkgs.writeShellApplication {
             name = "weeder-check";
             runtimeInputs = [
@@ -154,6 +167,19 @@
               package = haskellFormat;
               entry = "${haskellFormat}/bin/fourmolu-then-stylish-haskell";
               files = "\\.l?hs(-boot)?$";
+              before = [
+                "test"
+                "weeder"
+              ];
+            };
+            test = {
+              enable = true;
+              name = "test";
+              description = "Run the test suite.";
+              package = testCheck;
+              entry = "${testCheck}/bin/test-check";
+              files = "(\\.l?hs(-boot)?$|(^|/)package\\.yaml$)";
+              pass_filenames = false;
               before = [ "weeder" ];
             };
             weeder = {

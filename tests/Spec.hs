@@ -1,12 +1,14 @@
 module Main (main) where
 
 import qualified CodegenSpec
-import qualified IRSpec
+import qualified ComputeSpec
+import qualified IntegrationSpec
 import qualified ScheduleSpec
-import           Test.Hspec   (hspec)
+import           Test.Hspec      (hspec)
 
 main :: IO ()
 main = hspec $ do
-    IRSpec.spec
+    ComputeSpec.spec
     ScheduleSpec.spec
     CodegenSpec.spec
+    IntegrationSpec.spec

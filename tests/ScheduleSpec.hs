@@ -1,404 +1,295 @@
+{-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE TypeApplications #-}
+
 module ScheduleSpec (spec) where
 
-import           Aoewif.IR
+import           Aoewif.Compute
 import           Aoewif.Schedule
-import           Data.Word       (Word64)
-import           Test.Hspec      hiding (parallel)
+import           Data.Functor    (void)
+import           Test.Hspec
 
-data ParallelFixture = ParallelFixture
-    { parallelFunction  :: VerifiedComputeFunction
-    , parallelOperation :: ComputeOpId
-    , parallelFirst     :: IteratorId
-    , parallelSecond    :: IteratorId
+data VectorAxis scope = VectorAxis
+    { vectorAxis :: Axis scope Spatial
     }
 
-data DynamicFixture = DynamicFixture
-    { dynamicFunction  :: VerifiedComputeFunction
-    , dynamicOperation :: ComputeOpId
-    , dynamicIterator  :: IteratorId
-    , dynamicExtent    :: SymbolId
+data MatrixAxes scope = MatrixAxes
+    { rowAxis    :: Axis scope Spatial
+    , columnAxis :: Axis scope Spatial
     }
-
-data ReductionFixture = ReductionFixture
-    { reductionFunction  :: VerifiedComputeFunction
-    , reductionOperation :: ComputeOpId
-    , reductionRow       :: IteratorId
-    , firstReduction     :: IteratorId
-    , secondReduction    :: IteratorId
-    }
-
-parallel2d :: Word64 -> Word64 -> ParallelFixture
-parallel2d firstExtent secondExtent =
-    ParallelFixture
-        { parallelFunction = function
-        , parallelOperation = computeOpId operation
-        , parallelFirst = iteratorId first
-        , parallelSecond = iteratorId second
-        }
-  where
-    function = mustSucceed $ buildComputeFunction "parallel_2d" $ do
-        inputTensor <- input "input" (tensorTypeF32 [StaticDim firstExtent, StaticDim secondExtent])
-        output <- compute "output" $ do
-            firstIterator <- parallel "first" (StaticDim firstExtent)
-            secondIterator <- parallel "second" (StaticDim secondExtent)
-            readTensor inputTensor [IteratorIndex firstIterator, IteratorIndex secondIterator]
-        markOutput output
-    operation = onlyOperation function
-    (first, second) = twoIterators operation
-
-parallel1d :: Word64 -> ParallelFixture
-parallel1d extent =
-    ParallelFixture
-        { parallelFunction = function
-        , parallelOperation = computeOpId operation
-        , parallelFirst = iteratorId element
-        , parallelSecond = iteratorId element
-        }
-  where
-    function = mustSucceed $ buildComputeFunction "parallel_1d" $ do
-        inputTensor <- input "input" (tensorTypeF32 [StaticDim extent])
-        output <- compute "output" $ do
-            elementIterator <- parallel "element" (StaticDim extent)
-            readTensor inputTensor [IteratorIndex elementIterator]
-        markOutput output
-    operation = onlyOperation function
-    element = oneIterator operation
-
-dynamicParallel1d :: DynamicFixture
-dynamicParallel1d =
-    DynamicFixture
-        { dynamicFunction = function
-        , dynamicOperation = computeOpId operation
-        , dynamicIterator = iteratorId element
-        , dynamicExtent = symbolId extentSymbol
-        }
-  where
-    function = mustSucceed $ buildComputeFunction "dynamic_parallel_1d" $ do
-        extent <- symbol "extent"
-        inputTensor <- input "input" (tensorTypeF32 [SymbolDim extent])
-        output <- compute "output" $ do
-            elementIterator <- parallel "element" (SymbolDim extent)
-            readTensor inputTensor [IteratorIndex elementIterator]
-        markOutput output
-    operation = onlyOperation function
-    element = oneIterator operation
-    extentSymbol = onlySymbol function
-
-mixedReduction :: ReductionFixture
-mixedReduction =
-    ReductionFixture
-        { reductionFunction = function
-        , reductionOperation = computeOpId operation
-        , reductionRow = iteratorId row
-        , firstReduction = iteratorId first
-        , secondReduction = iteratorId second
-        }
-  where
-    function = mustSucceed $ buildComputeFunction "mixed_reduction" $ do
-        inputTensor <- input "input" (tensorTypeF32 [StaticDim 4, StaticDim 8, StaticDim 6])
-        output <- compute "output" $ do
-            firstIterator <- reduction "first_reduction" (StaticDim 4)
-            rowIterator <- parallel "row" (StaticDim 8)
-            secondIterator <- reduction "second_reduction" (StaticDim 6)
-            value <- readTensor inputTensor [IteratorIndex firstIterator, IteratorIndex rowIterator, IteratorIndex secondIterator]
-            accumulator <- reductionInit (F32Literal 0.0)
-            add accumulator value
-        markOutput output
-    operation = onlyOperation function
-    (first, row, second) = threeIterators operation
-
-onlyOperation :: VerifiedComputeFunction -> ComputeOp
-onlyOperation function = case functionOperations (verifiedFunction function) of
-    [operation] -> operation
-    _           -> error "fixture must contain exactly one operation"
-
-oneIterator :: ComputeOp -> Iterator
-oneIterator operation = case computeIterators operation of
-    [iterator] -> iterator
-    _          -> error "fixture operation must contain exactly one iterator"
-
-twoIterators :: ComputeOp -> (Iterator, Iterator)
-twoIterators operation = case computeIterators operation of
-    [first, second] -> (first, second)
-    _ -> error "fixture operation must contain exactly two iterators"
-
-threeIterators :: ComputeOp -> (Iterator, Iterator, Iterator)
-threeIterators operation = case computeIterators operation of
-    [first, second, third] -> (first, second, third)
-    _ -> error "fixture operation must contain exactly three iterators"
-
-onlySymbol :: VerifiedComputeFunction -> Symbol
-onlySymbol function = case functionSymbols (verifiedFunction function) of
-    [extent] -> extent
-    _        -> error "fixture must contain exactly one symbol"
-
-mustSucceed :: (Show error) => Either error value -> value
-mustSucceed = either (error . show) id
-
-splitIndex :: LoopId -> LoopId -> Word64 -> LoopIndexExpr
-splitIndex outer inner factor = AddIndex (MulIndex (LoopIndex outer) (LoopConstant factor)) (LoopIndex inner)
-
-data LoopAxisView = LoopAxisView LoopId IteratorId String LoopExtent IteratorKind (Maybe CudaBinding)
-    deriving (Eq, Show)
-
-loopAxisView :: LoopAxis -> LoopAxisView
-loopAxisView axis =
-    LoopAxisView
-        (loopAxisId axis)
-        (loopSourceIterator axis)
-        (loopName axis)
-        (loopExtent axis)
-        (loopKind axis)
-        (loopBinding axis)
-
-data LogicalIndexView = LogicalIndexView IteratorId LoopIndexExpr [(LoopIndexExpr, LoopExtent)]
-    deriving (Eq, Show)
-
-logicalIndexView :: LogicalIndex -> LogicalIndexView
-logicalIndexView logicalIndex =
-    LogicalIndexView
-        (logicalIterator logicalIndex)
-        (logicalExpression logicalIndex)
-        (map tailPredicateView (logicalTailPredicates logicalIndex))
-  where
-    tailPredicateView predicate = (tailPredicateIndex predicate, tailPredicateExtent predicate)
 
 spec :: Spec
-spec = do
-    describe "CPU scheduling" $ do
-        it "normalizes parallel loops before reductions" $ do
-            let fixture = mixedReduction
-                schedule = mustSucceed $ newCpuSchedule (reductionFunction fixture) (reductionOperation fixture)
-                verified = mustSucceed $ verifyCpuSchedule schedule
-                plan = verifiedCpuPlan verified
-                rowLoop = mustFind $ loopFor (reductionRow fixture) plan
-                firstReductionLoop = mustFind $ loopFor (firstReduction fixture) plan
-                secondReductionLoop = mustFind $ loopFor (secondReduction fixture) plan
-                expectedLoops =
-                    [ LoopAxisView rowLoop (reductionRow fixture) "row" (StaticExtent 8) Parallel Nothing
-                    , LoopAxisView firstReductionLoop (firstReduction fixture) "first_reduction" (StaticExtent 4) Reduction Nothing
-                    , LoopAxisView secondReductionLoop (secondReduction fixture) "second_reduction" (StaticExtent 6) Reduction Nothing
-                    ]
-            map loopAxisView (planLoops plan) `shouldBe` expectedLoops
-            logicalIndexView <$> lookupLogicalIndex (reductionRow fixture) plan
-                `shouldBe` Just (LogicalIndexView (reductionRow fixture) (LoopIndex rowLoop) [])
-            computeOpId (verifiedCpuOperation verified) `shouldBe` reductionOperation fixture
+spec = describe "schedule eDSL" $ do
+    it "splits, reorders, and binds spatial loops" $ do
+        Right sourceProgram <- pure $ program #copy_2d $ do
+            let rows = staticDim 128
+                columns = staticDim 70
+            source <- input @F32 #source (rows, columns)
+            output <- compute #output (rows, columns) $ \(row, column) ->
+                (MatrixAxes row column, source ! (row, column))
+            entry output
+        void
+            ( cuda defaultCudaTarget sourceProgram $ \MatrixAxes{rowAxis, columnAxis} -> do
+                row <- loop rowAxis
+                column <- loop columnAxis
+                (blockY, threadY) <- split row 16
+                (blockX, threadX) <- split column 32
+                reorder [blockY, blockX, threadY, threadX]
+                bind blockY BlockY
+                bind blockX BlockX
+                bind threadY ThreadY
+                bind threadX ThreadX
+            )
+            `shouldBe` Right ()
 
-        it "rewrites a split logical index without a divisible tail" $ do
-            let fixture = parallel2d 16 7
-                initial = mustSucceed $ newCpuSchedule (parallelFunction fixture) (parallelOperation fixture)
-                firstLoop = mustFind $ cpuLoopFor (parallelFirst fixture) initial
-                secondLoop = mustFind $ cpuLoopFor (parallelSecond fixture) initial
-                (outer, inner, transformed) = mustSucceed $ splitCpuSchedule firstLoop 4 initial
-                verified = mustSucceed $ verifyCpuSchedule transformed
-                plan = verifiedCpuPlan verified
-                expectedLoops =
-                    [ LoopAxisView outer (parallelFirst fixture) "first_outer" (StaticExtent 4) Parallel Nothing
-                    , LoopAxisView inner (parallelFirst fixture) "first_inner" (StaticExtent 4) Parallel Nothing
-                    , LoopAxisView secondLoop (parallelSecond fixture) "second" (StaticExtent 7) Parallel Nothing
-                    ]
-                expectedIndex = LogicalIndexView (parallelFirst fixture) (splitIndex outer inner 4) []
-            map loopAxisView (planLoops plan) `shouldBe` expectedLoops
-            logicalIndexView <$> lookupLogicalIndex (parallelFirst fixture) plan `shouldBe` Just expectedIndex
-            loopFor (parallelFirst fixture) plan `shouldBe` Nothing
+    it "reorders spatial loops while preserving a hidden reduction loop" $ do
+        Right sourceProgram <- pure $ program #row_sum $ do
+            let rows = staticDim 8
+                columns = staticDim 16
+                reductionSize = staticDim 4
+            source <- input @F32 #source (rows, columns, reductionSize)
+            output <- compute #output (rows, columns) $ \(row, column) ->
+                ( MatrixAxes row column
+                , foldOver reductionSize 0 $ \reductionAxis accumulator ->
+                    source ! (row, column, reductionAxis) .+. accumulator
+                )
+            entry output
+        void
+            ( cpu sourceProgram $ \MatrixAxes{rowAxis, columnAxis} -> do
+                row <- loop rowAxis
+                column <- loop columnAxis
+                reorder [column, row]
+            )
+            `shouldBe` Right ()
 
-        it "adds a tail predicate for a partial tile" $ do
-            let fixture = parallel2d 10 7
-                initial = mustSucceed $ newCpuSchedule (parallelFunction fixture) (parallelOperation fixture)
-                firstLoop = mustFind $ cpuLoopFor (parallelFirst fixture) initial
-                (outer, inner, transformed) = mustSucceed $ splitCpuSchedule firstLoop 4 initial
-                verified = mustSucceed $ verifyCpuSchedule transformed
-                plan = verifiedCpuPlan verified
-                expression = splitIndex outer inner 4
-                expectedIndex =
-                    LogicalIndexView
-                        (parallelFirst fixture)
-                        expression
-                        [(expression, StaticExtent 10)]
-            loopExtent <$> lookupLoopAxis outer plan `shouldBe` Just (StaticExtent 3)
-            loopExtent <$> lookupLoopAxis inner plan `shouldBe` Just (StaticExtent 4)
-            logicalIndexView <$> lookupLogicalIndex (parallelFirst fixture) plan `shouldBe` Just expectedIndex
+    it "rejects a zero split factor at the transformation" $ do
+        Right sourceProgram <- pure $ program #copy $ do
+            let size = staticDim 8
+            source <- input @F32 #source size
+            output <- compute #output size $ \element ->
+                (VectorAxis element, source ! element)
+            entry output
+        void
+            ( cpu sourceProgram $ \VectorAxis{vectorAxis} -> do
+                element <- loop vectorAxis
+                _ <- split element 0
+                pure ()
+            )
+            `shouldBe` Left ZeroSplitFactor
 
-        it "changes the physical loop order" $ do
-            let fixture = parallel2d 8 16
-                initial = mustSucceed $ newCpuSchedule (parallelFunction fixture) (parallelOperation fixture)
-                firstLoop = mustFind $ cpuLoopFor (parallelFirst fixture) initial
-                secondLoop = mustFind $ cpuLoopFor (parallelSecond fixture) initial
-                transformed = mustSucceed $ reorderCpuSchedule [secondLoop, firstLoop] initial
-                verified = mustSucceed $ verifyCpuSchedule transformed
-                plan = verifiedCpuPlan verified
-            map loopAxisId (planLoops plan) `shouldBe` [secondLoop, firstLoop]
-            logicalIndexView <$> lookupLogicalIndex (parallelFirst fixture) plan
-                `shouldBe` Just (LogicalIndexView (parallelFirst fixture) (LoopIndex firstLoop) [])
+    it "rejects a loop handle after that loop has been split" $ do
+        Right sourceProgram <- pure $ program #copy $ do
+            let size = staticDim 8
+            source <- input @F32 #source size
+            output <- compute #output size $ \element ->
+                (VectorAxis element, source ! element)
+            entry output
+        void
+            ( cpu sourceProgram $ \VectorAxis{vectorAxis} -> do
+                element <- loop vectorAxis
+                _ <- split element 4
+                _ <- split element 2
+                pure ()
+            )
+            `shouldBe` Left (UnknownLoop 0)
 
-    describe "CUDA scheduling" $ do
-        it "constructs target limits through read-only accessors" $ do
-            let block = newCudaDim3 64 32 16
-                grid = newCudaDim3 1024 512 256
-                target = newCudaTarget 128 block grid
-                observed =
-                    ( cudaMaxThreadsPerBlock target
-                    , (cudaDimX (cudaMaxBlockDimensions target), cudaDimY (cudaMaxBlockDimensions target), cudaDimZ (cudaMaxBlockDimensions target))
-                    ,
-                        ( cudaDimGet (cudaMaxGridDimensions target) DimensionX
-                        , cudaDimGet (cudaMaxGridDimensions target) DimensionY
-                        , cudaDimGet (cudaMaxGridDimensions target) DimensionZ
-                        )
-                    )
-            observed `shouldBe` (128, (64, 32, 16), (1024, 512, 256))
+    it "checks a zero split factor before a stale loop handle" $ do
+        Right sourceProgram <- pure $ program #copy $ do
+            let size = staticDim 8
+            source <- input @F32 #source size
+            output <- compute #output size $ \element ->
+                (VectorAxis element, source ! element)
+            entry output
+        void
+            ( cpu sourceProgram $ \VectorAxis{vectorAxis} -> do
+                element <- loop vectorAxis
+                _ <- split element 4
+                _ <- split element 0
+                pure ()
+            )
+            `shouldBe` Left ZeroSplitFactor
 
-        it "builds a block and thread loop plan" $ do
-            let fixture = parallel2d 128 70
-                target = defaultCudaTarget
-                initial = mustSucceed $ newCudaSchedule (parallelFunction fixture) (parallelOperation fixture) target
-                firstLoop = mustFind $ cudaLoopFor (parallelFirst fixture) initial
-                secondLoop = mustFind $ cudaLoopFor (parallelSecond fixture) initial
-                (firstOuter, firstInner, firstSplit) = mustSucceed $ splitCudaSchedule firstLoop 16 initial
-                (secondOuter, secondInner, secondSplit) = mustSucceed $ splitCudaSchedule secondLoop 32 firstSplit
-                reordered = mustSucceed $ reorderCudaSchedule [firstOuter, secondOuter, firstInner, secondInner] secondSplit
-                boundBlockY = mustSucceed $ bindCudaSchedule firstOuter BlockY reordered
-                boundBlockX = mustSucceed $ bindCudaSchedule secondOuter BlockX boundBlockY
-                boundThreadY = mustSucceed $ bindCudaSchedule firstInner ThreadY boundBlockX
-                boundThreadX = mustSucceed $ bindCudaSchedule secondInner ThreadX boundThreadY
-                verified = mustSucceed $ verifyCudaSchedule boundThreadX
-                plan = verifiedCudaPlan verified
-                expectedLoops =
-                    [ LoopAxisView firstOuter (parallelFirst fixture) "first_outer" (StaticExtent 8) Parallel (Just BlockY)
-                    , LoopAxisView secondOuter (parallelSecond fixture) "second_outer" (StaticExtent 3) Parallel (Just BlockX)
-                    , LoopAxisView firstInner (parallelFirst fixture) "first_inner" (StaticExtent 16) Parallel (Just ThreadY)
-                    , LoopAxisView secondInner (parallelSecond fixture) "second_inner" (StaticExtent 32) Parallel (Just ThreadX)
-                    ]
-                secondExpression = splitIndex secondOuter secondInner 32
-                expectedSecondIndex =
-                    LogicalIndexView
-                        (parallelSecond fixture)
-                        secondExpression
-                        [(secondExpression, StaticExtent 70)]
-            verifiedCudaTarget verified `shouldBe` target
-            map loopAxisView (planLoops plan) `shouldBe` expectedLoops
-            logicalIndexView <$> lookupLogicalIndex (parallelSecond fixture) plan `shouldBe` Just expectedSecondIndex
+    it "rejects incomplete and duplicate loop orders" $ do
+        Right sourceProgram <- pure $ program #copy_2d $ do
+            let rows = staticDim 8
+                columns = staticDim 16
+            source <- input @F32 #source (rows, columns)
+            output <- compute #output (rows, columns) $ \(row, column) ->
+                (MatrixAxes row column, source ! (row, column))
+            entry output
+        void
+            ( cpu sourceProgram $ \MatrixAxes{rowAxis} -> do
+                row <- loop rowAxis
+                reorder [row]
+            )
+            `shouldBe` Left (IncompleteLoopOrder 2 1)
+        void
+            ( cpu sourceProgram $ \MatrixAxes{rowAxis} -> do
+                row <- loop rowAxis
+                reorder [row, row]
+            )
+            `shouldBe` Left (DuplicateLoop 0)
 
-        it "allows a dynamic grid with static threads" $ do
-            let fixture = dynamicParallel1d
-                initial = mustSucceed $ newCudaSchedule (dynamicFunction fixture) (dynamicOperation fixture) defaultCudaTarget
-                element = mustFind $ cudaLoopFor (dynamicIterator fixture) initial
-                (outer, inner, splitSchedule) = mustSucceed $ splitCudaSchedule element 32 initial
-                blockBound = mustSucceed $ bindCudaSchedule outer BlockX splitSchedule
-                threadBound = mustSucceed $ bindCudaSchedule inner ThreadX blockBound
-                verified = mustSucceed $ verifyCudaSchedule threadBound
-                plan = verifiedCudaPlan verified
-                expression = splitIndex outer inner 32
-                expectedIndex =
-                    LogicalIndexView
-                        (dynamicIterator fixture)
-                        expression
-                        [(expression, SymbolExtent (dynamicExtent fixture))]
-            loopExtent <$> lookupLoopAxis outer plan
-                `shouldBe` Just (CeilDivExtent (SymbolExtent (dynamicExtent fixture)) 32)
-            loopExtent <$> lookupLoopAxis inner plan `shouldBe` Just (StaticExtent 32)
-            logicalIndexView <$> lookupLogicalIndex (dynamicIterator fixture) plan `shouldBe` Just expectedIndex
+    it "rejects splitting a loop after CUDA binding" $ do
+        Right sourceProgram <- pure $ program #copy $ do
+            let size = staticDim 8
+            source <- input @F32 #source size
+            output <- compute #output size $ \element ->
+                (VectorAxis element, source ! element)
+            entry output
+        void
+            ( cuda defaultCudaTarget sourceProgram $ \VectorAxis{vectorAxis} -> do
+                element <- loop vectorAxis
+                bind element ThreadX
+                _ <- split element 2
+                pure ()
+            )
+            `shouldBe` Left (BoundLoopSplitUnsupported "axis0")
 
-        it "rejects zero target limits" $ do
-            let fixture = parallel1d 1
-                block = newCudaDim3 1024 1024 64
-                grid = newCudaDim3 2147483647 65535 65535
-                cases =
-                    [ (newCudaTarget 0 block grid, "max threads per block")
-                    , (newCudaTarget 1024 (newCudaDim3 0 1024 64) grid, "max block dimension x")
-                    , (newCudaTarget 1024 (newCudaDim3 1024 0 64) grid, "max block dimension y")
-                    , (newCudaTarget 1024 (newCudaDim3 1024 1024 0) grid, "max block dimension z")
-                    , (newCudaTarget 1024 block (newCudaDim3 0 65535 65535), "max grid dimension x")
-                    , (newCudaTarget 1024 block (newCudaDim3 2147483647 0 65535), "max grid dimension y")
-                    , (newCudaTarget 1024 block (newCudaDim3 2147483647 65535 0), "max grid dimension z")
-                    ]
-            map
-                (\(target, _) -> newCudaSchedule (parallelFunction fixture) (parallelOperation fixture) target)
-                cases
-                `shouldBe` map (Left . InvalidCudaTargetLimit . snd) cases
+    it "rejects rebinding a loop and reusing a CUDA binding" $ do
+        Right sourceProgram <- pure $ program #copy_2d $ do
+            let rows = staticDim 8
+                columns = staticDim 16
+            source <- input @F32 #source (rows, columns)
+            output <- compute #output (rows, columns) $ \(row, column) ->
+                (MatrixAxes row column, source ! (row, column))
+            entry output
+        void
+            ( cuda defaultCudaTarget sourceProgram $ \MatrixAxes{rowAxis} -> do
+                row <- loop rowAxis
+                bind row ThreadX
+                bind row ThreadY
+            )
+            `shouldBe` Left (LoopAlreadyBound "axis0" ThreadX)
+        void
+            ( cuda defaultCudaTarget sourceProgram $ \MatrixAxes{rowAxis, columnAxis} -> do
+                row <- loop rowAxis
+                column <- loop columnAxis
+                bind row ThreadX
+                bind column ThreadX
+            )
+            `shouldBe` Left (BindingAlreadyUsed ThreadX "axis0")
 
-        it "rejects duplicate bindings" $ do
-            let fixture = parallel2d 8 16
-                initial = mustSucceed $ newCudaSchedule (parallelFunction fixture) (parallelOperation fixture) defaultCudaTarget
-                firstLoop = mustFind $ cudaLoopFor (parallelFirst fixture) initial
-                secondLoop = mustFind $ cudaLoopFor (parallelSecond fixture) initial
-                firstBound = mustSucceed $ bindCudaSchedule firstLoop ThreadX initial
-            bindCudaSchedule firstLoop ThreadY firstBound
-                `shouldBe` Left (LoopAlreadyBound "first" ThreadX)
-            bindCudaSchedule secondLoop ThreadX firstBound
-                `shouldBe` Left (BindingAlreadyUsed ThreadX "first")
+    it "allows a dynamic grid extent after splitting off static threads" $ do
+        Right sourceProgram <- pure $ program #dynamic_copy $ do
+            size <- dim #size
+            source <- input @F32 #source size
+            output <- compute #output size $ \element ->
+                (VectorAxis element, source ! element)
+            entry output
+        void
+            ( cuda defaultCudaTarget sourceProgram $ \VectorAxis{vectorAxis} -> do
+                element <- loop vectorAxis
+                (blockX, threadX) <- split element 32
+                bind blockX BlockX
+                bind threadX ThreadX
+            )
+            `shouldBe` Right ()
 
-        it "rejects a dynamic thread extent" $ do
-            let fixture = dynamicParallel1d
-                initial = mustSucceed $ newCudaSchedule (dynamicFunction fixture) (dynamicOperation fixture) defaultCudaTarget
-                element = mustFind $ cudaLoopFor (dynamicIterator fixture) initial
-                bound = mustSucceed $ bindCudaSchedule element ThreadX initial
-            verifyCudaSchedule bound `shouldBe` Left (DynamicCudaThreadExtent "element")
+    it "rejects a dynamic CUDA thread extent when binding" $ do
+        Right sourceProgram <- pure $ program #dynamic_copy $ do
+            size <- dim #size
+            source <- input @F32 #source size
+            output <- compute #output size $ \element ->
+                (VectorAxis element, source ! element)
+            entry output
+        void
+            ( cuda defaultCudaTarget sourceProgram $ \VectorAxis{vectorAxis} -> do
+                element <- loop vectorAxis
+                bind element ThreadX
+            )
+            `shouldBe` Left (DynamicCudaThreadExtent "axis0")
 
-        it "enforces block and grid dimension limits" $ do
-            let fixture = parallel1d 33
-                threadTarget = newCudaTarget 1024 (newCudaDim3 32 1024 64) (newCudaDim3 1024 1024 1024)
-                threadInitial = mustSucceed $ newCudaSchedule (parallelFunction fixture) (parallelOperation fixture) threadTarget
-                threadElement = mustFind $ cudaLoopFor (parallelFirst fixture) threadInitial
-                threadBound = mustSucceed $ bindCudaSchedule threadElement ThreadX threadInitial
-                blockTarget = newCudaTarget 1024 (newCudaDim3 1024 1024 64) (newCudaDim3 32 1024 1024)
-                blockInitial = mustSucceed $ newCudaSchedule (parallelFunction fixture) (parallelOperation fixture) blockTarget
-                blockElement = mustFind $ cudaLoopFor (parallelFirst fixture) blockInitial
-                blockBound = mustSucceed $ bindCudaSchedule blockElement BlockX blockInitial
-            verifyCudaSchedule threadBound `shouldBe` Left (CudaDimensionExceeded ThreadX 33 32)
-            verifyCudaSchedule blockBound `shouldBe` Left (CudaDimensionExceeded BlockX 33 32)
+    it "rejects zero CUDA launch dimensions when binding" $ do
+        Right sourceProgram <- pure $ program #empty_copy $ do
+            let size = staticDim 0
+            source <- input @F32 #source size
+            output <- compute #output size $ \element ->
+                (VectorAxis element, source ! element)
+            entry output
+        void
+            ( cuda defaultCudaTarget sourceProgram $ \VectorAxis{vectorAxis} -> do
+                element <- loop vectorAxis
+                bind element ThreadX
+            )
+            `shouldBe` Left (ZeroCudaLaunchDimension ThreadX)
 
-        it "enforces total threads per block" $ do
-            let fixture = parallel2d 32 16
-                target = newCudaTarget 256 (newCudaDim3 1024 1024 64) (newCudaDim3 1024 1024 1024)
-                initial = mustSucceed $ newCudaSchedule (parallelFunction fixture) (parallelOperation fixture) target
-                firstLoop = mustFind $ cudaLoopFor (parallelFirst fixture) initial
-                secondLoop = mustFind $ cudaLoopFor (parallelSecond fixture) initial
-                firstBound = mustSucceed $ bindCudaSchedule firstLoop ThreadX initial
-                secondBound = mustSucceed $ bindCudaSchedule secondLoop ThreadY firstBound
-            verifyCudaSchedule secondBound `shouldBe` Left (CudaThreadsPerBlockExceeded 512 256)
+    it "rejects zero CUDA target limits before scheduling" $ do
+        Right sourceProgram <- pure $ program #copy $ do
+            let size = staticDim 1
+            source <- input @F32 #source size
+            output <- compute #output size $ \element ->
+                (VectorAxis element, source ! element)
+            entry output
+        let block = newCudaDim3 1024 1024 64
+            grid = newCudaDim3 2147483647 65535 65535
+            results =
+                [ cuda (newCudaTarget 0 block grid) sourceProgram (\_ -> pure ())
+                , cuda (newCudaTarget 1024 (newCudaDim3 0 1024 64) grid) sourceProgram (\_ -> pure ())
+                , cuda (newCudaTarget 1024 (newCudaDim3 1024 0 64) grid) sourceProgram (\_ -> pure ())
+                , cuda (newCudaTarget 1024 (newCudaDim3 1024 1024 0) grid) sourceProgram (\_ -> pure ())
+                , cuda (newCudaTarget 1024 block (newCudaDim3 0 65535 65535)) sourceProgram (\_ -> pure ())
+                , cuda (newCudaTarget 1024 block (newCudaDim3 2147483647 0 65535)) sourceProgram (\_ -> pure ())
+                , cuda (newCudaTarget 1024 block (newCudaDim3 2147483647 65535 0)) sourceProgram (\_ -> pure ())
+                ]
+        map void results
+            `shouldBe` [ Left (InvalidCudaTargetLimit "max threads per block")
+                       , Left (InvalidCudaTargetLimit "max block dimension x")
+                       , Left (InvalidCudaTargetLimit "max block dimension y")
+                       , Left (InvalidCudaTargetLimit "max block dimension z")
+                       , Left (InvalidCudaTargetLimit "max grid dimension x")
+                       , Left (InvalidCudaTargetLimit "max grid dimension y")
+                       , Left (InvalidCudaTargetLimit "max grid dimension z")
+                       ]
 
-    describe "invalid transformations" $ do
-        it "rejects zero, stale, and foreign loops in precedence order" $ do
-            let fixture = parallel2d 16 8
-                firstSchedule = mustSucceed $ newCpuSchedule (parallelFunction fixture) (parallelOperation fixture)
-                secondSchedule = mustSucceed $ newCpuSchedule (parallelFunction fixture) (parallelOperation fixture)
-                original = mustFind $ cpuLoopFor (parallelFirst fixture) firstSchedule
-                foreignLoop = mustFind $ cpuLoopFor (parallelFirst fixture) secondSchedule
-                (_, _, splitSchedule) = mustSucceed $ splitCpuSchedule original 4 firstSchedule
-            splitCpuSchedule original 0 firstSchedule `shouldBe` Left ZeroSplitFactor
-            splitCpuSchedule original 2 splitSchedule `shouldBe` Left (UnknownLoop original)
-            splitCpuSchedule foreignLoop 2 splitSchedule `shouldBe` Left (ForeignLoop foreignLoop)
+    it "enforces CUDA block and grid dimension limits" $ do
+        Right sourceProgram <- pure $ program #copy $ do
+            let size = staticDim 33
+            source <- input @F32 #source size
+            output <- compute #output size $ \element ->
+                (VectorAxis element, source ! element)
+            entry output
+        void
+            ( cuda (newCudaTarget 1024 (newCudaDim3 32 1024 64) (newCudaDim3 1024 1024 1024)) sourceProgram $ \VectorAxis{vectorAxis} -> do
+                element <- loop vectorAxis
+                bind element ThreadX
+            )
+            `shouldBe` Left (CudaDimensionExceeded ThreadX 33 32)
+        void
+            ( cuda (newCudaTarget 1024 (newCudaDim3 1024 1024 64) (newCudaDim3 32 1024 1024)) sourceProgram $ \VectorAxis{vectorAxis} -> do
+                element <- loop vectorAxis
+                bind element BlockX
+            )
+            `shouldBe` Left (CudaDimensionExceeded BlockX 33 32)
 
-        it "does not split, reorder, or bind strict reduction loops" $ do
-            let fixture = mixedReduction
-                splitInitial = mustSucceed $ newCpuSchedule (reductionFunction fixture) (reductionOperation fixture)
-                splitReduction = mustFind $ cpuLoopFor (firstReduction fixture) splitInitial
-                reorderInitial = mustSucceed $ newCpuSchedule (reductionFunction fixture) (reductionOperation fixture)
-                rowLoop = mustFind $ cpuLoopFor (reductionRow fixture) reorderInitial
-                firstReductionLoop = mustFind $ cpuLoopFor (firstReduction fixture) reorderInitial
-                secondReductionLoop = mustFind $ cpuLoopFor (secondReduction fixture) reorderInitial
-                cudaInitial = mustSucceed $ newCudaSchedule (reductionFunction fixture) (reductionOperation fixture) defaultCudaTarget
-                cudaReduction = mustFind $ cudaLoopFor (firstReduction fixture) cudaInitial
-            splitCpuSchedule splitReduction 2 splitInitial
-                `shouldBe` Left (ReductionSplitUnsupported "first_reduction")
-            reorderCpuSchedule [rowLoop, secondReductionLoop, firstReductionLoop] reorderInitial
-                `shouldBe` Left ReductionReorderUnsupported
-            reorderCpuSchedule [firstReductionLoop, rowLoop, secondReductionLoop] reorderInitial
-                `shouldBe` Left ParallelLoopInsideReduction
-            bindCudaSchedule cudaReduction ThreadX cudaInitial
-                `shouldBe` Left (ReductionBindUnsupported "first_reduction")
+    it "enforces the total CUDA threads per block" $ do
+        Right sourceProgram <- pure $ program #copy_2d $ do
+            let rows = staticDim 32
+                columns = staticDim 16
+            source <- input @F32 #source (rows, columns)
+            output <- compute #output (rows, columns) $ \(row, column) ->
+                (MatrixAxes row column, source ! (row, column))
+            entry output
+        void
+            ( cuda (newCudaTarget 256 (newCudaDim3 1024 1024 64) (newCudaDim3 1024 1024 1024)) sourceProgram $ \MatrixAxes{rowAxis, columnAxis} -> do
+                row <- loop rowAxis
+                column <- loop columnAxis
+                bind row ThreadX
+                bind column ThreadY
+            )
+            `shouldBe` Left (CudaThreadsPerBlockExceeded 512 256)
 
-        it "checks Word64 overflow in nested split divisors" $ do
-            let fixture = dynamicParallel1d
-                initial = mustSucceed $ newCpuSchedule (dynamicFunction fixture) (dynamicOperation fixture)
-                element = mustFind $ cpuLoopFor (dynamicIterator fixture) initial
-                (outer, _, splitSchedule) = mustSucceed $ splitCpuSchedule element maxBound initial
-            splitCpuSchedule outer 2 splitSchedule `shouldBe` Left (ArithmeticOverflow "split loop divisor")
-
-mustFind :: Maybe value -> value
-mustFind = fromMaybeError "fixture lookup failed"
-
-fromMaybeError :: String -> Maybe value -> value
-fromMaybeError message optional = case optional of
-    Just value -> value
-    Nothing    -> error message
+    it "checks Word64 overflow in nested dynamic split divisors" $ do
+        Right sourceProgram <- pure $ program #dynamic_copy $ do
+            size <- dim #size
+            source <- input @F32 #source size
+            output <- compute #output size $ \element ->
+                (VectorAxis element, source ! element)
+            entry output
+        void
+            ( cpu sourceProgram $ \VectorAxis{vectorAxis} -> do
+                element <- loop vectorAxis
+                (outer, _) <- split element maxBound
+                _ <- split outer 2
+                pure ()
+            )
+            `shouldBe` Left (ArithmeticOverflow "split loop divisor")

@@ -6,20 +6,22 @@ module Aoewif.Codegen (
     cudaSourceText,
     cudaKernelName,
     CodegenError (..),
-    displayCodegenError,
     generateC,
     generateCuda,
 )
 where
 
-import qualified Aoewif.IR         as IR
-import qualified Aoewif.Schedule   as Schedule
-import           Control.Exception (Exception (displayException))
-import           Control.Monad     (foldM)
-import           Data.List         (nub, sort)
-import           Data.Ratio        (denominator, numerator, (%))
-import           Data.Word         (Word32)
-import           GHC.Float         (castFloatToWord32, castWord32ToFloat)
+import qualified Aoewif.Internal.IR               as IR
+import qualified Aoewif.Internal.Schedule.Builder as Builder
+import qualified Aoewif.Internal.Schedule.Core    as Schedule
+import           Control.Monad                    (foldM)
+import           Data.Char                        (isAsciiLower, isAsciiUpper,
+                                                   isDigit)
+import           Data.List                        (nub, sort)
+import           Data.Ratio                       (denominator, numerator, (%))
+import           Data.Word                        (Word32)
+import           GHC.Float                        (castFloatToWord32,
+                                                   castWord32ToFloat)
 
 data CSource = CSource String String
     deriving (Eq, Show)
@@ -40,58 +42,42 @@ cudaKernelName :: CudaSource -> String
 cudaKernelName (CudaSource _ kernelName) = kernelName
 
 data CodegenError
-    = ExactlyOneOperationRequired Int
-    | ExactlyOneOutputRequired Int
+    = ExactlyOneOutputRequired Int
     | ScheduledOperationIsNotOutput
     | ScheduledOperationMismatch
     | NonInputTensorAccess Int
-    | UnsupportedTensorElement
-    | UnsupportedScalarType
     | MissingScalarValue Int
     | MissingLogicalIndex Int
     | InvalidLoopPlan
+    | InvalidFunctionIdentifier String
     deriving (Eq, Show)
 
-displayCodegenError :: CodegenError -> String
-displayCodegenError codegenError = case codegenError of
-    ExactlyOneOperationRequired actual ->
-        "code generation requires exactly one compute operation, got " ++ show actual
-    ExactlyOneOutputRequired actual ->
-        "code generation requires exactly one output, got " ++ show actual
-    ScheduledOperationIsNotOutput ->
-        "the scheduled operation result is not the function output"
-    ScheduledOperationMismatch ->
-        "the schedule does not refer to the function operation"
-    NonInputTensorAccess tensorIndex ->
-        "tensor value " ++ show tensorIndex ++ " is not a function input"
-    UnsupportedTensorElement -> "only f32 tensors are supported"
-    UnsupportedScalarType -> "unsupported scalar type"
-    MissingScalarValue scalarIndex -> "missing scalar value " ++ show scalarIndex
-    MissingLogicalIndex iteratorIndex ->
-        "missing logical index for iterator " ++ show iteratorIndex
-    InvalidLoopPlan -> "invalid scheduled loop plan"
+generateC :: Builder.CpuSchedule -> Either CodegenError CSource
+generateC schedule = Builder.withCpuSchedule schedule generateScheduledC
 
-instance Exception CodegenError where
-    displayException = displayCodegenError
-
-generateC :: Schedule.VerifiedCpuSchedule -> Either CodegenError CSource
-generateC schedule = do
-    let verifiedFunction = Schedule.verifiedCpuFunction schedule
-        operation = Schedule.verifiedCpuOperation schedule
-        plan = Schedule.verifiedCpuPlan schedule
-    generated <- generateSource CBackend verifiedFunction operation plan
+generateScheduledC :: Schedule.CpuSchedule -> Either CodegenError CSource
+generateScheduledC schedule = do
+    let function = Schedule.cpuScheduleFunction schedule
+        operation = Schedule.cpuScheduleOperation schedule
+        plan = Schedule.cpuSchedulePlan schedule
+    generated <- generateSource CBackend function operation plan
     pure (CSource (generatedText generated) (generatedName generated))
 
-generateCuda :: Schedule.VerifiedCudaSchedule -> Either CodegenError CudaSource
-generateCuda schedule = do
-    let verifiedFunction = Schedule.verifiedCudaFunction schedule
-        operation = Schedule.verifiedCudaOperation schedule
-        plan = Schedule.verifiedCudaPlan schedule
-    generated <- generateSource CudaBackend verifiedFunction operation plan
+generateCuda :: Builder.CudaSchedule -> Either CodegenError CudaSource
+generateCuda schedule = Builder.withCudaSchedule schedule generateScheduledCuda
+
+generateScheduledCuda :: Schedule.CudaSchedule -> Either CodegenError CudaSource
+generateScheduledCuda schedule = do
+    let function = Schedule.cudaScheduleFunction schedule
+        operation = Schedule.cudaScheduleOperation schedule
+        plan = Schedule.cudaSchedulePlan schedule
+    generated <- generateSource CudaBackend function operation plan
     pure (CudaSource (generatedText generated) (generatedName generated))
 
 data Backend = CBackend | CudaBackend
     deriving (Eq)
+
+newtype FunctionIdentifier = FunctionIdentifier String
 
 data GeneratedSource = GeneratedSource
     { generatedText :: String
@@ -103,10 +89,9 @@ data SourceNode
     | BlankLine
     | SourceScope String [SourceNode] String
 
-generateSource :: Backend -> IR.VerifiedComputeFunction -> IR.ComputeOp -> Schedule.LoopPlan -> Either CodegenError GeneratedSource
-generateSource backend verified operation plan = do
-    let function = IR.verifiedFunction verified
-    validateCodegenFunction function operation
+generateSource :: Backend -> IR.ComputeFunction -> IR.ComputeOp -> Schedule.LoopPlan -> Either CodegenError GeneratedSource
+generateSource backend function operation plan = do
+    identifier <- parseFunctionIdentifier (IR.functionName function)
     loopValue <- loopValueFunction backend plan
     let parallelLoops = filter ((== IR.Parallel) . Schedule.loopKind) (Schedule.planLoops plan)
         reductionLoops = filter ((== IR.Reduction) . Schedule.loopKind) (Schedule.planLoops plan)
@@ -135,14 +120,14 @@ generateSource backend verified operation plan = do
     let sourceNodes =
             backendPreamble backend
                 ++ [ SourceScope
-                        (functionDeclaration backend function ++ " {")
+                        (functionDeclaration backend identifier function ++ " {")
                         functionBody
                         "}"
                    ]
     pure
         GeneratedSource
             { generatedText = renderSource sourceNodes
-            , generatedName = IR.functionName function
+            , generatedName = functionIdentifierText identifier
             }
 
 backendPreamble :: Backend -> [SourceNode]
@@ -163,9 +148,9 @@ backendPreamble backend = case backend of
         , BlankLine
         ]
 
-functionDeclaration :: Backend -> IR.ComputeFunction -> String
-functionDeclaration backend function =
-    prefix ++ IR.functionName function ++ "(" ++ commaSeparated parameters ++ ")"
+functionDeclaration :: Backend -> FunctionIdentifier -> IR.ComputeFunction -> String
+functionDeclaration backend identifier function =
+    prefix ++ functionIdentifierText identifier ++ "(" ++ commaSeparated parameters ++ ")"
   where
     prefix = case backend of
         CBackend    -> "void "
@@ -180,6 +165,18 @@ functionDeclaration backend function =
         IR.ComputeResult _ -> error "inputTensors returned a compute result"
     symbolParameter symbol =
         "size_t symbol" ++ show (IR.symbolIdIndex (IR.symbolId symbol))
+
+parseFunctionIdentifier :: String -> Either CodegenError FunctionIdentifier
+parseFunctionIdentifier value@(first : rest)
+    | validFirst first && all validRest rest = Right (FunctionIdentifier value)
+    | otherwise = Left (InvalidFunctionIdentifier value)
+  where
+    validFirst character = character == '_' || isAsciiLower character || isAsciiUpper character
+    validRest character = validFirst character || isDigit character
+parseFunctionIdentifier [] = Left (InvalidFunctionIdentifier [])
+
+functionIdentifierText :: FunctionIdentifier -> String
+functionIdentifierText (FunctionIdentifier value) = value
 
 loopValueFunction :: Backend -> Schedule.LoopPlan -> Either CodegenError (Schedule.LoopId -> Either CodegenError String)
 loopValueFunction backend plan =
@@ -316,6 +313,12 @@ accessIndexExpression plan loopValue indexExpression = case indexExpression of
 
 outputIndexExpression :: IR.ComputeFunction -> IR.ComputeOp -> Schedule.LoopPlan -> (Schedule.LoopId -> Either CodegenError String) -> Either CodegenError String
 outputIndexExpression function operation plan loopValue = do
+    output <- case IR.functionOutputs function of
+        [identifier] -> Right identifier
+        outputs      -> Left (ExactlyOneOutputRequired (length outputs))
+    if output == IR.computeResult operation
+        then Right ()
+        else Left ScheduledOperationIsNotOutput
     indices <-
         mapM
             (\iterator -> logicalIndexExpression plan (IR.iteratorId iterator) loopValue)
@@ -530,25 +533,6 @@ cudaBindingExpression binding = case binding of
     Schedule.ThreadX -> "((size_t)threadIdx.x)"
     Schedule.ThreadY -> "((size_t)threadIdx.y)"
     Schedule.ThreadZ -> "((size_t)threadIdx.z)"
-
-validateCodegenFunction :: IR.ComputeFunction -> IR.ComputeOp -> Either CodegenError ()
-validateCodegenFunction function operation = case operations of
-    [functionOperation]
-        | IR.computeOpId functionOperation /= IR.computeOpId operation -> Left ScheduledOperationMismatch
-        | otherwise -> case outputs of
-            [output]
-                | output /= IR.computeResult operation -> Left ScheduledOperationIsNotOutput
-                | unsupportedTensorElement -> Left UnsupportedTensorElement
-                | otherwise -> Right ()
-            _ -> Left (ExactlyOneOutputRequired (length outputs))
-    _ -> Left (ExactlyOneOperationRequired (length operations))
-  where
-    operations = IR.functionOperations function
-    outputs = IR.functionOutputs function
-    unsupportedTensorElement =
-        any
-            ((/= IR.F32) . IR.tensorElementType . IR.tensorValueType)
-            (IR.functionTensors function)
 
 inputName :: IR.ComputeFunction -> IR.TensorValueId -> Either CodegenError String
 inputName function tensorId = case IR.lookupTensor tensorId function of
