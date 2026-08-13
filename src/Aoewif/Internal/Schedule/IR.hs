@@ -1,106 +1,50 @@
 module Aoewif.Internal.Schedule.IR (
-    LoopId,
-    loopIdIndex,
-    LoopExtent (..),
-    staticLoopExtent,
-    LoopIndexExpression (..),
-    TailPredicate,
-    tailPredicateIndex,
-    tailPredicateExtent,
-    LogicalIndex,
-    logicalIndexVariable,
-    logicalExpression,
-    logicalTailPredicates,
+    LoopId (..),
+    IndexExpr (..),
+    Predicate (..),
+    AxisBinding (..),
+    ExecutionKind (..),
     CudaBinding (..),
-    CudaDimension (..),
-    isBlockBinding,
-    isThreadBinding,
-    bindingDimension,
-    LoopKind (..),
-    LoopAxis,
-    loopAxisId,
-    loopSourceIndex,
-    loopName,
-    loopExtent,
-    loopKind,
-    loopBinding,
-    LoopPlan,
-    planLoops,
-    planLogicalIndices,
-    lookupLogicalIndex,
-    logicalIndexFor,
-    lookupLoopAxis,
-    loopAxisFor,
-    loopFor,
-    ScheduleError (..),
-    createLoopPlan,
-    splitLoopPlan,
-    reorderLoopPlan,
-    bindLoopPlan,
-    checkedMultiply,
-)
-where
+    LoopDim (..),
+    ScheduleNode (..),
+    ScheduleIR (..),
+    initialScheduleIR,
+    splitScheduleIR,
+    reorderScheduleIR,
+    parallelScheduleIR,
+    unrollScheduleIR,
+    bindCudaScheduleIR,
+) where
 
 import qualified Aoewif.Internal.Compute.IR as Compute
-import           Data.List                  (find, findIndex)
+import           Data.List                  (find)
 import           Data.Maybe                 (fromJust)
 import           Data.Word                  (Word64)
 
 newtype LoopId = LoopId Int
-    deriving stock (Eq, Ord)
+    deriving stock (Eq, Ord, Show)
 
-instance Show LoopId where
-    show loopId = "LoopId " ++ show (loopIdIndex loopId)
-
-loopIdIndex :: LoopId -> Int
-loopIdIndex (LoopId index) = index
-
-data LoopExtent
-    = StaticExtent Word64
-    | SymbolExtent Compute.SymbolId
-    | CeilDivExtent LoopExtent Word64
-    deriving stock (Eq, Show)
-
-staticLoopExtent :: LoopExtent -> Maybe Word64
-staticLoopExtent extent = case extent of
-    StaticExtent value -> Just value
-    SymbolExtent _ -> Nothing
-    CeilDivExtent dividend divisor -> ceilDivWord64 <$> staticLoopExtent dividend <*> pure divisor
-
-data LoopIndexExpression
+data IndexExpr
     = LoopIndex LoopId
-    | LoopConstant Word64
-    | AddIndex LoopIndexExpression LoopIndexExpression
-    | MulIndex LoopIndexExpression LoopIndexExpression
+    | ConstantIndex Word64
+    | AddIndex IndexExpr IndexExpr
+    | MulIndex IndexExpr IndexExpr
+    deriving stock (Eq, Ord, Show)
+
+data Predicate
+    = IndexLessThan IndexExpr Compute.DimExpr
     deriving stock (Eq, Show)
 
-data TailPredicate = TailPredicate
-    { internalTailPredicateIndex  :: LoopIndexExpression
-    , internalTailPredicateExtent :: LoopExtent
+data AxisBinding = AxisBinding
+    { bindingAxis  :: Compute.AxisId
+    , bindingIndex :: IndexExpr
     }
     deriving stock (Eq, Show)
 
-tailPredicateIndex :: TailPredicate -> LoopIndexExpression
-tailPredicateIndex = internalTailPredicateIndex
-
-tailPredicateExtent :: TailPredicate -> LoopExtent
-tailPredicateExtent = internalTailPredicateExtent
-
-data LogicalIndex = LogicalIndex
-    { internalLogicalIndexVariable :: Compute.IndexId
-    , internalLogicalExpression    :: LoopIndexExpression
-    , internalTailPredicates       :: [TailPredicate]
-    }
+data ExecutionKind
+    = Serial
+    | Parallel
     deriving stock (Eq, Show)
-
-logicalIndexVariable :: LogicalIndex -> Compute.IndexId
-logicalIndexVariable = internalLogicalIndexVariable
-
-logicalExpression :: LogicalIndex -> LoopIndexExpression
-logicalExpression = internalLogicalExpression
-
-logicalTailPredicates :: LogicalIndex -> [TailPredicate]
-logicalTailPredicates = internalTailPredicates
 
 data CudaBinding
     = BlockX
@@ -111,286 +55,205 @@ data CudaBinding
     | ThreadZ
     deriving stock (Eq, Ord, Show)
 
-data CudaDimension = DimensionX | DimensionY | DimensionZ
-    deriving stock (Eq, Ord, Show)
-
-isBlockBinding :: CudaBinding -> Bool
-isBlockBinding binding = case binding of
-    BlockX  -> True
-    BlockY  -> True
-    BlockZ  -> True
-    ThreadX -> False
-    ThreadY -> False
-    ThreadZ -> False
-
-isThreadBinding :: CudaBinding -> Bool
-isThreadBinding = not . isBlockBinding
-
-bindingDimension :: CudaBinding -> CudaDimension
-bindingDimension binding = case binding of
-    BlockX  -> DimensionX
-    ThreadX -> DimensionX
-    BlockY  -> DimensionY
-    ThreadY -> DimensionY
-    BlockZ  -> DimensionZ
-    ThreadZ -> DimensionZ
-
-data LoopKind
-    = SpatialLoop
-    | ReductionLoop
-    deriving stock (Eq, Show)
-
-data LoopAxis = LoopAxis
-    { internalLoopAxisId  :: LoopId
-    , internalLoopSource  :: Compute.IndexId
-    , internalLoopName    :: String
-    , internalLoopExtent  :: LoopExtent
-    , internalLoopKind    :: LoopKind
-    , internalLoopBinding :: Maybe CudaBinding
+data LoopDim = LoopDim
+    { loopId           :: LoopId
+    , loopName         :: Compute.Name
+    , loopLowerBound   :: Compute.DimExpr
+    , loopExtent       :: Compute.DimExpr
+    , loopExecution    :: ExecutionKind
+    , loopUnrollFactor :: Maybe Word64
+    , loopCudaBinding  :: Maybe CudaBinding
     }
     deriving stock (Eq, Show)
 
-loopAxisId :: LoopAxis -> LoopId
-loopAxisId = internalLoopAxisId
+data ScheduleNode
+    = Band [LoopDim] ScheduleNode
+    | Sequence [ScheduleNode]
+    | Guard Predicate ScheduleNode
+    | Leaf Compute.BlockId [AxisBinding]
+    deriving stock (Eq, Show)
 
-loopSourceIndex :: LoopAxis -> Compute.IndexId
-loopSourceIndex = internalLoopSource
-
-loopName :: LoopAxis -> String
-loopName = internalLoopName
-
-loopExtent :: LoopAxis -> LoopExtent
-loopExtent = internalLoopExtent
-
-loopKind :: LoopAxis -> LoopKind
-loopKind = internalLoopKind
-
-loopBinding :: LoopAxis -> Maybe CudaBinding
-loopBinding = internalLoopBinding
-
-data LoopPlan = LoopPlan
-    { internalLoopPlanNextIndex  :: !Int
-    , internalPlanLoops          :: [LoopAxis]
-    , internalPlanLogicalIndices :: [LogicalIndex]
+newtype ScheduleIR = ScheduleIR
+    { scheduleRoot :: ScheduleNode
     }
     deriving stock (Eq, Show)
 
-planLoops :: LoopPlan -> [LoopAxis]
-planLoops = internalPlanLoops
-
-planLogicalIndices :: LoopPlan -> [LogicalIndex]
-planLogicalIndices = internalPlanLogicalIndices
-
-lookupLogicalIndex :: Compute.IndexId -> LoopPlan -> Maybe LogicalIndex
-lookupLogicalIndex index = find ((== index) . logicalIndexVariable) . planLogicalIndices
-
-logicalIndexFor :: Compute.IndexId -> LoopPlan -> LogicalIndex
-logicalIndexFor index = fromJust . lookupLogicalIndex index
-
-lookupLoopAxis :: LoopId -> LoopPlan -> Maybe LoopAxis
-lookupLoopAxis loopId = find ((== loopId) . loopAxisId) . planLoops
-
-loopAxisFor :: LoopId -> LoopPlan -> LoopAxis
-loopAxisFor loopId = fromJust . lookupLoopAxis loopId
-
-loopFor :: Compute.IndexId -> LoopPlan -> LoopId
-loopFor index = loopAxisId . fromJust . find ((== index) . loopSourceIndex) . planLoops
-
-data ScheduleError
-    = UnknownLoop Int
-    | ZeroSplitFactor
-    | ReductionSplitUnsupported String
-    | BoundLoopSplitUnsupported String
-    | IncompleteLoopOrder Int Int
-    | DuplicateLoop Int
-    | ReductionReorderUnsupported
-    | SpatialLoopInsideReduction
-    | ReductionBindUnsupported String
-    | LoopAlreadyBound String CudaBinding
-    | BindingAlreadyUsed CudaBinding String
-    | InvalidCudaTargetLimit String
-    | DynamicCudaThreadExtent String
-    | ZeroCudaLaunchDimension CudaBinding
-    | CudaDimensionExceeded CudaBinding Word64 Word64
-    | CudaThreadsPerBlockExceeded Word64 Word64
-    | ArithmeticOverflow String
-    deriving stock (Eq, Show)
-
-createLoopPlan :: Compute.Compute -> LoopPlan
-createLoopPlan computation =
-    LoopPlan
-        { internalLoopPlanNextIndex = length axes
-        , internalPlanLoops = axes
-        , internalPlanLogicalIndices = zipWith newLogicalIndex indices axes
+initialScheduleIR :: Compute.ComputeIR -> (ScheduleIR, [(Compute.BlockId, Compute.AxisId, LoopId)], Int)
+initialScheduleIR computeIR =
+    ( ScheduleIR
+        { scheduleRoot = Sequence nodes
         }
+    , handles
+    , nextLoop
+    )
   where
-    spatial = [(index, SpatialLoop) | index <- Compute.computeIndices computation]
-    reductions = [(index, ReductionLoop) | index <- Compute.reductionIndices (Compute.computeBody computation)]
-    indexed = spatial ++ reductions
-    indices = map fst indexed
-    axes = zipWith newAxis [0 ..] indexed
-    newAxis identifier (index, kind) =
-        LoopAxis
-            { internalLoopAxisId = LoopId identifier
-            , internalLoopSource = Compute.indexId index
-            , internalLoopName = Compute.indexName index
-            , internalLoopExtent = extentFromDim (Compute.indexExtent index)
-            , internalLoopKind = kind
-            , internalLoopBinding = Nothing
-            }
-    newLogicalIndex index axis =
-        LogicalIndex
-            { internalLogicalIndexVariable = Compute.indexId index
-            , internalLogicalExpression = LoopIndex (loopAxisId axis)
-            , internalTailPredicates = []
-            }
+    (nodes, handles, nextLoop) = buildBlocks 0 (Compute.computeBlocks computeIR)
 
-splitLoopPlan :: LoopId -> Word64 -> LoopPlan -> Either ScheduleError (LoopId, LoopId, LoopPlan)
-splitLoopPlan loopId factor plan
-    | factor == 0 = Left ZeroSplitFactor
-    | otherwise = do
-        position <- loopPosition loopId plan
-        let original = planLoops plan !! position
-        case loopKind original of
-            ReductionLoop -> Left (ReductionSplitUnsupported (loopName original))
-            SpatialLoop -> pure ()
-        case loopBinding original of
-            Just _  -> Left (BoundLoopSplitUnsupported (loopName original))
-            Nothing -> pure ()
-        outerExtent <- ceilDivExtent factor (loopExtent original)
-        let outerId = LoopId (internalLoopPlanNextIndex plan)
-            innerId = LoopId (internalLoopPlanNextIndex plan + 1)
-            outer =
-                original
-                    { internalLoopAxisId = outerId
-                    , internalLoopName = loopName original ++ "_outer"
-                    , internalLoopExtent = outerExtent
-                    }
-            inner =
-                original
-                    { internalLoopAxisId = innerId
-                    , internalLoopName = loopName original ++ "_inner"
-                    , internalLoopExtent = StaticExtent factor
-                    }
-            replacement = splitIndex outerId innerId factor
-            before = take position (planLoops plan)
-            after = drop (position + 1) (planLoops plan)
-            rewritten = map (rewriteLogicalIndex original loopId replacement factor) (planLogicalIndices plan)
-            nextPlan =
-                plan
-                    { internalLoopPlanNextIndex = internalLoopPlanNextIndex plan + 2
-                    , internalPlanLoops = before ++ [outer, inner] ++ after
-                    , internalPlanLogicalIndices = rewritten
-                    }
-        pure (outerId, innerId, nextPlan)
+buildBlocks :: Int -> [Compute.ComputeBlock] -> ([ScheduleNode], [(Compute.BlockId, Compute.AxisId, LoopId)], Int)
+buildBlocks next [] = ([], [], next)
+buildBlocks next (computeBlock : rest) =
+    let axes = Compute.blockAxes computeBlock
+        loopIdentifiers = map LoopId [next .. next + length axes - 1]
+        dimensions = zipWith newLoopDim loopIdentifiers axes
+        bindings = zipWith (AxisBinding . Compute.axisId) axes (map LoopIndex loopIdentifiers)
+        node = Band dimensions (Leaf (Compute.blockId computeBlock) bindings)
+        blockHandles = zipWith (\axisDecl identifier -> (Compute.blockId computeBlock, Compute.axisId axisDecl, identifier)) axes loopIdentifiers
+        (remainingNodes, remainingHandles, finalNext) = buildBlocks (next + length axes) rest
+     in (node : remainingNodes, blockHandles ++ remainingHandles, finalNext)
 
-rewriteLogicalIndex :: LoopAxis -> LoopId -> LoopIndexExpression -> Word64 -> LogicalIndex -> LogicalIndex
-rewriteLogicalIndex original target replacement factor logicalIndex
-    | logicalIndexVariable logicalIndex /= loopSourceIndex original = logicalIndex
-    | otherwise =
-        logicalIndex
-            { internalLogicalExpression = replaceLoop target replacement (logicalExpression logicalIndex)
-            , internalTailPredicates = rewrittenPredicates ++ newPredicate
-            }
-  where
-    rewrittenPredicates =
-        map
-            (\predicate -> predicate{internalTailPredicateIndex = replaceLoop target replacement (tailPredicateIndex predicate)})
-            (logicalTailPredicates logicalIndex)
-    newPredicate
-        | divisibleBy factor (loopExtent original) = []
-        | otherwise = [TailPredicate replacement (loopExtent original)]
+newLoopDim :: LoopId -> Compute.AxisDecl -> LoopDim
+newLoopDim identifier axisDecl =
+    LoopDim
+        { loopId = identifier
+        , loopName = Compute.axisName axisDecl
+        , loopLowerBound = Compute.axisLower axisDecl
+        , loopExtent = Compute.axisExtent axisDecl
+        , loopExecution = Serial
+        , loopUnrollFactor = Nothing
+        , loopCudaBinding = Nothing
+        }
 
-reorderLoopPlan :: [LoopId] -> LoopPlan -> Either ScheduleError LoopPlan
-reorderLoopPlan order plan
-    | length order /= length (planLoops plan) = Left (IncompleteLoopOrder (length (planLoops plan)) (length order))
-    | otherwise = do
-        reordered <- collect [] order
-        let currentReductions = map loopAxisId (filter ((== ReductionLoop) . loopKind) (planLoops plan))
-            reorderedReductions = map loopAxisId (filter ((== ReductionLoop) . loopKind) reordered)
-        if currentReductions /= reorderedReductions
-            then Left ReductionReorderUnsupported
-            else
-                if hasSpatialInsideReduction reordered
-                    then Left SpatialLoopInsideReduction
-                    else pure plan{internalPlanLoops = reordered}
-  where
-    collect _ [] = pure []
-    collect seen (loopId : rest)
-        | loopId `elem` seen = Left (DuplicateLoop (loopIdIndex loopId))
-        | otherwise = do
-            axis <- loopAxisChecked loopId plan
-            remaining <- collect (seen ++ [loopId]) rest
-            pure (axis : remaining)
+splitScheduleIR :: Compute.BlockId -> LoopId -> Word64 -> LoopId -> LoopId -> ScheduleIR -> ScheduleIR
+splitScheduleIR blockIdentifier target factor outerIdentifier innerIdentifier scheduleIR =
+    scheduleIR
+        { scheduleRoot = splitBlock blockIdentifier target factor outerIdentifier innerIdentifier (scheduleRoot scheduleIR)
+        }
 
-bindLoopPlan :: LoopId -> CudaBinding -> LoopPlan -> Either ScheduleError LoopPlan
-bindLoopPlan loopId binding plan = do
-    position <- loopPosition loopId plan
-    let selected = planLoops plan !! position
-    case loopKind selected of
-        ReductionLoop -> Left (ReductionBindUnsupported (loopName selected))
-        SpatialLoop   -> pure ()
-    case loopBinding selected of
-        Just existing -> Left (LoopAlreadyBound (loopName selected) existing)
-        Nothing       -> pure ()
-    case find ((== Just binding) . loopBinding) (planLoops plan) of
-        Just existing -> Left (BindingAlreadyUsed binding (loopName existing))
-        Nothing       -> pure ()
-    let rebound = selected{internalLoopBinding = Just binding}
-        loops = take position (planLoops plan) ++ [rebound] ++ drop (position + 1) (planLoops plan)
-    pure plan{internalPlanLoops = loops}
+splitBlock :: Compute.BlockId -> LoopId -> Word64 -> LoopId -> LoopId -> ScheduleNode -> ScheduleNode
+splitBlock blockIdentifier target factor outerIdentifier innerIdentifier node = case node of
+    Band dimensions child
+        | any ((== target) . loopId) dimensions && containsBlock blockIdentifier child ->
+            let original = loopDimFor target node
+                replacement = AddIndex (MulIndex (LoopIndex outerIdentifier) (ConstantIndex factor)) (LoopIndex innerIdentifier)
+                outer =
+                    original
+                        { loopId = outerIdentifier
+                        , loopName = appendName (loopName original) "_outer"
+                        , loopExtent = Compute.CeilDivDim (loopExtent original) factor
+                        }
+                inner =
+                    original
+                        { loopId = innerIdentifier
+                        , loopName = appendName (loopName original) "_inner"
+                        , loopLowerBound = Compute.StaticDim 0
+                        , loopExtent = Compute.StaticDim factor
+                        , loopExecution = Serial
+                        , loopUnrollFactor = Nothing
+                        , loopCudaBinding = Nothing
+                        }
+                rewritten = replaceLoopNode target replacement outer inner node
+             in if needsTailGuard factor (loopExtent original)
+                    then addGuard (IndexLessThan replacement (loopExtent original)) rewritten
+                    else rewritten
+        | otherwise -> Band dimensions (splitBlock blockIdentifier target factor outerIdentifier innerIdentifier child)
+    Sequence children -> Sequence (map (splitBlock blockIdentifier target factor outerIdentifier innerIdentifier) children)
+    Guard predicate child -> Guard predicate (splitBlock blockIdentifier target factor outerIdentifier innerIdentifier child)
+    Leaf _ _ -> node
 
-loopPosition :: LoopId -> LoopPlan -> Either ScheduleError Int
-loopPosition loopId plan = maybe (Left (UnknownLoop (loopIdIndex loopId))) Right (findIndex ((== loopId) . loopAxisId) (planLoops plan))
+reorderScheduleIR :: Compute.BlockId -> [LoopId] -> ScheduleIR -> ScheduleIR
+reorderScheduleIR blockIdentifier order scheduleIR =
+    scheduleIR
+        { scheduleRoot = reorderBlock blockIdentifier order (scheduleRoot scheduleIR)
+        }
 
-loopAxisChecked :: LoopId -> LoopPlan -> Either ScheduleError LoopAxis
-loopAxisChecked loopId plan = do
-    position <- loopPosition loopId plan
-    pure (planLoops plan !! position)
+parallelScheduleIR :: LoopId -> ScheduleIR -> ScheduleIR
+parallelScheduleIR identifier scheduleIR =
+    scheduleIR
+        { scheduleRoot = mapLoop identifier (\dimension -> dimension{loopExecution = Parallel}) (scheduleRoot scheduleIR)
+        }
 
-extentFromDim :: Compute.Dim -> LoopExtent
-extentFromDim dimension = case dimension of
-    Compute.StaticDim value  -> StaticExtent value
-    Compute.SymbolDim symbol -> SymbolExtent symbol
+unrollScheduleIR :: LoopId -> Word64 -> ScheduleIR -> ScheduleIR
+unrollScheduleIR identifier factor scheduleIR =
+    scheduleIR
+        { scheduleRoot = mapLoop identifier (\dimension -> dimension{loopUnrollFactor = Just factor}) (scheduleRoot scheduleIR)
+        }
 
-ceilDivExtent :: Word64 -> LoopExtent -> Either ScheduleError LoopExtent
-ceilDivExtent divisor extent = case extent of
-    StaticExtent value -> Right (StaticExtent (ceilDivWord64 value divisor))
-    SymbolExtent _ -> Right (CeilDivExtent extent divisor)
-    CeilDivExtent dividend innerDivisor -> do
-        combined <- checkedMultiply "split loop divisor" innerDivisor divisor
-        Right (CeilDivExtent dividend combined)
+bindCudaScheduleIR :: LoopId -> CudaBinding -> ScheduleIR -> ScheduleIR
+bindCudaScheduleIR identifier cudaBinding scheduleIR =
+    scheduleIR
+        { scheduleRoot = mapLoop identifier (\dimension -> dimension{loopCudaBinding = Just cudaBinding}) (scheduleRoot scheduleIR)
+        }
 
-divisibleBy :: Word64 -> LoopExtent -> Bool
-divisibleBy divisor extent = case staticLoopExtent extent of
-    Just value -> value `mod` divisor == 0
-    Nothing    -> False
+reorderBlock :: Compute.BlockId -> [LoopId] -> ScheduleNode -> ScheduleNode
+reorderBlock blockIdentifier order node = case node of
+    Band dimensions child
+        | containsBlock blockIdentifier child ->
+            Band (map (dimensionFor dimensions) order) (reorderBlock blockIdentifier order child)
+        | otherwise -> Band dimensions (reorderBlock blockIdentifier order child)
+    Sequence children -> Sequence (map (reorderBlock blockIdentifier order) children)
+    Guard predicate child -> Guard predicate (reorderBlock blockIdentifier order child)
+    Leaf _ _ -> node
 
-splitIndex :: LoopId -> LoopId -> Word64 -> LoopIndexExpression
-splitIndex outer inner factor = AddIndex (MulIndex (LoopIndex outer) (LoopConstant factor)) (LoopIndex inner)
+dimensionFor :: [LoopDim] -> LoopId -> LoopDim
+dimensionFor dimensions identifier = fromJust (find ((== identifier) . loopId) dimensions)
 
-replaceLoop :: LoopId -> LoopIndexExpression -> LoopIndexExpression -> LoopIndexExpression
-replaceLoop target replacement expression = case expression of
-    LoopIndex loopId
-        | loopId == target -> replacement
+replaceLoopNode :: LoopId -> IndexExpr -> LoopDim -> LoopDim -> ScheduleNode -> ScheduleNode
+replaceLoopNode target replacement outer inner node = case node of
+    Band dimensions child ->
+        Band (concatMap replaceDimension dimensions) (replaceLoopNode target replacement outer inner child)
+      where
+        replaceDimension dimension
+            | loopId dimension == target = [outer, inner]
+            | otherwise = [dimension]
+    Sequence children -> Sequence (map (replaceLoopNode target replacement outer inner) children)
+    Guard predicate child -> Guard (replacePredicate target replacement predicate) (replaceLoopNode target replacement outer inner child)
+    Leaf blockIdentifier bindings -> Leaf blockIdentifier (map replaceBinding bindings)
+      where
+        replaceBinding binding = binding{bindingIndex = replaceIndex target replacement (bindingIndex binding)}
+
+mapLoop :: LoopId -> (LoopDim -> LoopDim) -> ScheduleNode -> ScheduleNode
+mapLoop target transform node = case node of
+    Band dimensions child -> Band (map update dimensions) (mapLoop target transform child)
+      where
+        update dimension
+            | loopId dimension == target = transform dimension
+            | otherwise = dimension
+    Sequence children -> Sequence (map (mapLoop target transform) children)
+    Guard predicate child -> Guard predicate (mapLoop target transform child)
+    Leaf _ _ -> node
+
+replacePredicate :: LoopId -> IndexExpr -> Predicate -> Predicate
+replacePredicate target replacement (IndexLessThan indexExpression extent) =
+    IndexLessThan (replaceIndex target replacement indexExpression) extent
+
+replaceIndex :: LoopId -> IndexExpr -> IndexExpr -> IndexExpr
+replaceIndex target replacement expression = case expression of
+    LoopIndex identifier
+        | identifier == target -> replacement
         | otherwise -> expression
-    LoopConstant _ -> expression
-    AddIndex lhs rhs -> AddIndex (replaceLoop target replacement lhs) (replaceLoop target replacement rhs)
-    MulIndex lhs rhs -> MulIndex (replaceLoop target replacement lhs) (replaceLoop target replacement rhs)
+    ConstantIndex _ -> expression
+    AddIndex lhs rhs -> AddIndex (replaceIndex target replacement lhs) (replaceIndex target replacement rhs)
+    MulIndex lhs rhs -> MulIndex (replaceIndex target replacement lhs) (replaceIndex target replacement rhs)
 
-hasSpatialInsideReduction :: [LoopAxis] -> Bool
-hasSpatialInsideReduction = go False
-  where
-    go _ [] = False
-    go sawReduction (axis : rest) = case loopKind axis of
-        SpatialLoop | sawReduction -> True
-        SpatialLoop                -> go sawReduction rest
-        ReductionLoop              -> go True rest
+addGuard :: Predicate -> ScheduleNode -> ScheduleNode
+addGuard predicate node = case node of
+    Band dimensions child -> Band dimensions (addGuard predicate child)
+    Sequence children     -> Sequence (map (addGuard predicate) children)
+    Guard existing child  -> Guard existing (addGuard predicate child)
+    Leaf _ _              -> Guard predicate node
 
-ceilDivWord64 :: Word64 -> Word64 -> Word64
-ceilDivWord64 value divisor = value `div` divisor + if value `mod` divisor == 0 then 0 else 1
+loopDimFor :: LoopId -> ScheduleNode -> LoopDim
+loopDimFor identifier = fromJust . find ((== identifier) . loopId) . allLoopDims
 
-checkedMultiply :: String -> Word64 -> Word64 -> Either ScheduleError Word64
-checkedMultiply context lhs rhs
-    | lhs /= 0 && rhs > maxBound `div` lhs = Left (ArithmeticOverflow context)
-    | otherwise = Right (lhs * rhs)
+allLoopDims :: ScheduleNode -> [LoopDim]
+allLoopDims node = case node of
+    Band dimensions child -> dimensions ++ allLoopDims child
+    Sequence children     -> concatMap allLoopDims children
+    Guard _ child         -> allLoopDims child
+    Leaf _ _              -> []
+
+containsBlock :: Compute.BlockId -> ScheduleNode -> Bool
+containsBlock blockIdentifier node = case node of
+    Band _ child      -> containsBlock blockIdentifier child
+    Sequence children -> any (containsBlock blockIdentifier) children
+    Guard _ child     -> containsBlock blockIdentifier child
+    Leaf identifier _ -> identifier == blockIdentifier
+
+needsTailGuard :: Word64 -> Compute.DimExpr -> Bool
+needsTailGuard divisor extent = case extent of
+    Compute.StaticDim value -> value `mod` divisor /= 0
+    Compute.SymbolDim _     -> True
+    Compute.CeilDivDim _ _  -> True
+
+appendName :: Compute.Name -> String -> Compute.Name
+appendName (Compute.Name name) suffix = Compute.Name (name ++ suffix)

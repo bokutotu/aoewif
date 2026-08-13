@@ -3,8 +3,10 @@ module Aoewif.Internal.Kernel.IR (
     ValueRole (..),
     valueIndex,
     valueRole,
+    Buffer (..),
     LoopId (..),
     BuiltinIndex (..),
+    LoopExecution (..),
     IndexExpression (..),
     IndexPredicate (..),
     Origin (..),
@@ -12,6 +14,7 @@ module Aoewif.Internal.Kernel.IR (
     Value (..),
     Statement (..),
     Input (..),
+    Output (..),
     Kernel (..),
     newValueId,
 ) where
@@ -36,6 +39,11 @@ valueIndex (ValueId identifier _) = identifier
 valueRole :: ValueId -> ValueRole
 valueRole (ValueId _ role) = role
 
+data Buffer
+    = InputBuffer Int
+    | OutputBuffer Int
+    deriving stock (Eq, Ord, Show)
+
 newtype LoopId = LoopId Int
     deriving stock (Eq, Ord, Show)
 
@@ -47,6 +55,11 @@ data BuiltinIndex
     | ThreadY
     | ThreadZ
     deriving stock (Eq, Ord, Show)
+
+data LoopExecution
+    = SerialExecution
+    | ParallelExecution
+    deriving stock (Eq, Show)
 
 data IndexExpression
     = LoopValue LoopId
@@ -60,18 +73,20 @@ data IndexExpression
     | FlattenedValue IndexExpression IndexExpression IndexExpression
     deriving stock (Eq, Ord, Show)
 
-data IndexPredicate = IndexLessThan IndexExpression IndexExpression
+data IndexPredicate
+    = IndexLessThan IndexExpression IndexExpression
+    | IndexEqual IndexExpression IndexExpression
     deriving stock (Eq, Ord, Show)
 
 data Origin
-    = ComputeOrigin Compute.ComputeId String
-    | NodeOrigin Compute.ComputeNodeId String
+    = BlockOrigin Compute.BlockId Compute.Name
+    | NodeOrigin Compute.ComputeNodeId Compute.Name
     deriving stock (Eq, Show)
 
 data ScalarOperation
     = LiteralOperation Compute.ScalarLiteral
     | IndexOperation IndexExpression
-    | LoadOperation Int IndexExpression
+    | LoadOperation Buffer IndexExpression
     | AddOperation ValueId ValueId
     | SubOperation ValueId ValueId
     | MulOperation ValueId ValueId
@@ -87,7 +102,7 @@ data ScalarOperation
 
 data Value = Value
     { valueId        :: ValueId
-    , valueType      :: Compute.ScalarType
+    , valueType      :: Compute.DType
     , valueOrigin    :: Origin
     , valueOperation :: ScalarOperation
     }
@@ -95,16 +110,27 @@ data Value = Value
 
 data Statement
     = DefineValue Value
-    | InitializeAccumulator ValueId Compute.ScalarLiteral Origin
-    | AssignValue ValueId ValueId
-    | ForLoop LoopId IndexExpression [Statement]
+    | ForLoop
+        LoopId
+        IndexExpression
+        IndexExpression
+        LoopExecution
+        (Maybe Word64)
+        (Maybe BuiltinIndex)
+        [Statement]
     | Conditional [IndexPredicate] [Statement]
-    | StoreOutput IndexExpression ValueId Origin
+    | StoreBuffer Buffer IndexExpression ValueId Origin
     deriving stock (Eq, Show)
 
 data Input = Input
     { inputIndex  :: Int
-    , inputTensor :: Compute.Tensor
+    , inputTensor :: Compute.TensorDecl
+    }
+    deriving stock (Eq, Show)
+
+data Output = Output
+    { outputIndex  :: Int
+    , outputTensor :: Compute.TensorDecl
     }
     deriving stock (Eq, Show)
 
@@ -112,7 +138,7 @@ data Kernel = Kernel
     { kernelName    :: String
     , kernelSymbols :: [Compute.Symbol]
     , kernelInputs  :: [Input]
-    , kernelOutput  :: Compute.Tensor
+    , kernelOutputs :: [Output]
     , kernelBody    :: [Statement]
     }
     deriving stock (Eq, Show)

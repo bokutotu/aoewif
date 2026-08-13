@@ -9,18 +9,20 @@ module Aoewif.Internal.Codegen.Base (
 import qualified Aoewif.Internal.Compute.IR as Compute
 import qualified Aoewif.Internal.Kernel.IR  as Kernel
 import           Data.Ratio                 (denominator, numerator, (%))
-import           Data.Word                  (Word32)
+import           Data.Word                  (Word32, Word64)
 import           GHC.Float                  (castFloatToWord32,
                                              castWord32ToFloat)
 
 data Backend = Backend
-    { backendPreambleLines  :: [String]
-    , backendFunctionPrefix :: String
-    , backendAddExpression  :: String -> String -> String
-    , backendSubExpression  :: String -> String -> String
-    , backendMulExpression  :: String -> String -> String
-    , backendDivExpression  :: String -> String -> String
-    , backendFmaExpression  :: String -> String -> String -> String
+    { backendPreambleLines     :: [String]
+    , backendFunctionPrefix    :: String
+    , backendParallelDirective :: Maybe String
+    , backendUnrollDirective   :: Word64 -> String
+    , backendAddExpression     :: String -> String -> String
+    , backendSubExpression     :: String -> String -> String
+    , backendMulExpression     :: String -> String -> String
+    , backendDivExpression     :: String -> String -> String
+    , backendFmaExpression     :: String -> String -> String -> String
     }
 
 data GeneratedSource = GeneratedSource
@@ -60,9 +62,10 @@ functionDeclaration backend kernel =
   where
     parameters =
         map inputParameter (Kernel.kernelInputs kernel)
-            ++ ["float* output"]
+            ++ map outputParameter (Kernel.kernelOutputs kernel)
             ++ map symbolParameter (Kernel.kernelSymbols kernel)
     inputParameter input = "const float* input" ++ show (Kernel.inputIndex input)
+    outputParameter output = "float* output" ++ show (Kernel.outputIndex output)
     symbolParameter symbol = "size_t symbol" ++ show (symbolIndex (Compute.symbolId symbol))
 
 statementNodes :: Backend -> Kernel.Statement -> [SourceNode]
@@ -77,48 +80,41 @@ statementNodes backend statement = case statement of
                 ++ ";"
             )
         ]
-    Kernel.InitializeAccumulator identifier literal _ ->
-        [ SourceLine
-            ( scalarTypeName (Compute.scalarLiteralType literal)
-                ++ " "
-                ++ scalarName identifier
-                ++ " = "
-                ++ scalarLiteral literal
-                ++ ";"
-            )
-        ]
-    Kernel.AssignValue target source ->
-        [SourceLine (scalarName target ++ " = " ++ scalarName source ++ ";")]
-    Kernel.ForLoop identifier extent body ->
-        [ SourceScope
-            ( "for (size_t "
-                ++ loopName identifier
-                ++ " = 0; "
-                ++ loopName identifier
-                ++ " < "
-                ++ indexExpression extent
-                ++ "; ++"
-                ++ loopName identifier
-                ++ ") {"
-            )
-            (concatMap (statementNodes backend) body)
-            "}"
-        ]
+    Kernel.ForLoop identifier lower extent execution unroll builtin body -> case builtin of
+        Just _ -> concatMap (statementNodes backend) body
+        Nothing ->
+            loopDirectives backend execution unroll
+                ++ [ SourceScope
+                        ( "for (size_t "
+                            ++ loopName identifier
+                            ++ " = "
+                            ++ indexExpression lower
+                            ++ "; "
+                            ++ loopName identifier
+                            ++ " < "
+                            ++ indexExpression (loopUpperBound lower extent)
+                            ++ "; ++"
+                            ++ loopName identifier
+                            ++ ") {"
+                        )
+                        (concatMap (statementNodes backend) body)
+                        "}"
+                   ]
     Kernel.Conditional predicates body ->
         [ SourceScope
             ("if (" ++ joinWith " && " (map indexPredicate predicates) ++ ") {")
             (concatMap (statementNodes backend) body)
             "}"
         ]
-    Kernel.StoreOutput address value _ ->
-        [SourceLine ("output[" ++ indexExpression address ++ "] = " ++ scalarName value ++ ";")]
+    Kernel.StoreBuffer buffer address value _ ->
+        [SourceLine (bufferName buffer ++ "[" ++ indexExpression address ++ "] = " ++ scalarName value ++ ";")]
 
 scalarOperationExpression :: Backend -> Kernel.ScalarOperation -> String
 scalarOperationExpression backend operation = case operation of
     Kernel.LiteralOperation literal -> scalarLiteral literal
     Kernel.IndexOperation expression -> indexExpression expression
-    Kernel.LoadOperation input address ->
-        "input" ++ show input ++ "[" ++ indexExpression address ++ "]"
+    Kernel.LoadOperation buffer address ->
+        bufferName buffer ++ "[" ++ indexExpression address ++ "]"
     Kernel.AddOperation lhs rhs -> binary (backendAddExpression backend) lhs rhs
     Kernel.SubOperation lhs rhs -> binary (backendSubExpression backend) lhs rhs
     Kernel.MulOperation lhs rhs -> binary (backendMulExpression backend) lhs rhs
@@ -176,6 +172,7 @@ indexExpression expression = case expression of
 indexPredicate :: Kernel.IndexPredicate -> String
 indexPredicate predicate = case predicate of
     Kernel.IndexLessThan lhs rhs -> indexExpression lhs ++ " < " ++ indexExpression rhs
+    Kernel.IndexEqual lhs rhs -> indexExpression lhs ++ " == " ++ indexExpression rhs
 
 builtinExpression :: Kernel.BuiltinIndex -> String
 builtinExpression builtin = case builtin of
@@ -196,7 +193,7 @@ scalarName identifier = case Kernel.valueRole identifier of
         | ordinal == 0 -> "accumulator"
         | otherwise -> "accumulator" ++ show ordinal
 
-scalarTypeName :: Compute.ScalarType -> String
+scalarTypeName :: Compute.DType -> String
 scalarTypeName scalarType = case scalarType of
     Compute.F32Type   -> "float"
     Compute.BoolType  -> "bool"
@@ -330,6 +327,27 @@ compareOperator predicate = case predicate of
 
 symbolIndex :: Compute.SymbolId -> Int
 symbolIndex (Compute.SymbolId identifier) = identifier
+
+bufferName :: Kernel.Buffer -> String
+bufferName buffer = case buffer of
+    Kernel.InputBuffer identifier -> "input" ++ show identifier
+    Kernel.OutputBuffer identifier ->
+        "output" ++ show identifier
+
+loopDirectives :: Backend -> Kernel.LoopExecution -> Maybe Word64 -> [SourceNode]
+loopDirectives backend execution unroll = parallelDirective ++ unrollDirective
+  where
+    parallelDirective = case (execution, backendParallelDirective backend) of
+        (Kernel.ParallelExecution, Just directive) -> [SourceLine directive]
+        _                                          -> []
+    unrollDirective = case unroll of
+        Just factor -> [SourceLine (backendUnrollDirective backend factor)]
+        Nothing     -> []
+
+loopUpperBound :: Kernel.IndexExpression -> Kernel.IndexExpression -> Kernel.IndexExpression
+loopUpperBound lower extent = case lower of
+    Kernel.DimensionValue 0 -> extent
+    _                       -> Kernel.AddValue lower extent
 
 renderSource :: [SourceNode] -> String
 renderSource = concatMap (renderNode 0)

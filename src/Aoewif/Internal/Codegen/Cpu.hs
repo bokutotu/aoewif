@@ -20,8 +20,8 @@ cFunctionName :: CSource -> String
 cFunctionName (CSource _ functionName) = functionName
 
 generateC :: Builder.CpuSchedule -> CSource
-generateC schedule = Builder.withCpuSchedule schedule $ \cpuSchedule ->
-    let generated = generateSource cpuBackend (Kernel.lowerCpuSchedule cpuSchedule)
+generateC schedule =
+    let generated = generateSource cpuBackend (Kernel.lowerCpuSchedule schedule)
      in CSource (generatedText generated) (generatedName generated)
 
 cpuBackend :: Backend
@@ -36,6 +36,8 @@ cpuBackend =
             , ""
             ]
         , backendFunctionPrefix = "void "
+        , backendParallelDirective = Just "#pragma omp parallel for"
+        , backendUnrollDirective = \factor -> "#pragma GCC unroll " ++ show factor
         , backendAddExpression = infixExpression " + "
         , backendSubExpression = infixExpression " - "
         , backendMulExpression = infixExpression " * "

@@ -20,7 +20,6 @@ ghc-options:
 library:
   source-dirs: src
   exposed-modules:
-    - Aoewif
     - Aoewif.Codegen
     - Aoewif.Compute
     - Aoewif.Schedule

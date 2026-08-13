@@ -20,8 +20,8 @@ cudaKernelName :: CudaSource -> String
 cudaKernelName (CudaSource _ kernelName) = kernelName
 
 generateCuda :: Builder.CudaSchedule -> CudaSource
-generateCuda schedule = Builder.withCudaSchedule schedule $ \cudaSchedule ->
-    let generated = generateSource cudaBackend (Kernel.lowerCudaSchedule cudaSchedule)
+generateCuda schedule =
+    let generated = generateSource cudaBackend (Kernel.lowerCudaSchedule schedule)
      in CudaSource (generatedText generated) (generatedName generated)
 
 cudaBackend :: Backend
@@ -35,6 +35,8 @@ cudaBackend =
             , ""
             ]
         , backendFunctionPrefix = "__global__ void "
+        , backendParallelDirective = Nothing
+        , backendUnrollDirective = \factor -> "#pragma unroll " ++ show factor
         , backendAddExpression = function2 "__fadd_rn"
         , backendSubExpression = function2 "__fsub_rn"
         , backendMulExpression = function2 "__fmul_rn"

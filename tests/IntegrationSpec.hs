@@ -1,44 +1,24 @@
 {-# LANGUAGE OverloadedLabels #-}
-{-# LANGUAGE TypeApplications #-}
 
 module IntegrationSpec (spec) where
 
-import           Aoewif
-import           Prelude    hiding (compare, exp, log, maximum, minimum)
+import           Aoewif.Codegen
+import           Aoewif.Compute
+import qualified Aoewif.Schedule as Schedule
 import           Test.Hspec
-
-data GemmAxes scope
-    = GemmAxes
-        (Axis scope Spatial)
-        (Axis scope Spatial)
-
-data MatrixAxes scope = MatrixAxes
-    { matrixRowAxis    :: Axis scope Spatial
-    , matrixColumnAxis :: Axis scope Spatial
-    }
-
-newtype VectorAxis scope = VectorAxis (Axis scope Spatial)
 
 spec :: Spec
 spec = describe "compute to source integration" $ do
-    it "generates CPU source for strict GEMM" $ do
-        let built = program #gemm $ do
-                rows <- dim #rows
-                columns <- dim #columns
-                reductionSize <- dim #reduction
-                left <- input @F32 #left (rows, reductionSize)
-                right <- input @F32 #right (reductionSize, columns)
-                output <- compute #output (rows, columns) $ \(row, column) ->
-                    ( GemmAxes row column
-                    , named #dotProduct $
-                        foldOver reductionSize 0 $ \inner accumulator ->
-                            fma (left ! (row, inner)) (right ! (inner, column)) accumulator
-                    )
-                entry output
-        Right gemmProgram <- pure built
-        Right gemmSchedule <- pure $ cpu gemmProgram (\_ -> pure ())
-        let source = generateC gemmSchedule
-        (cSourceText source, cFunctionName source)
+    it "generates CPU source for a pointwise block" $ do
+        let computeIR = program #copy $ do
+                size <- dim #size
+                inputTensor <- input #source f32 [size]
+                result <- output #result f32 [size]
+                block #copy $ do
+                    element <- spatial #i size
+                    define result [element] (inputTensor ! [element])
+            generated = generateC (Schedule.cpu computeIR (pure ()))
+        (cSourceText generated, cFunctionName generated)
             `shouldBe` ( unlines
                             [ "#include <math.h>"
                             , "#include <stdbool.h>"
@@ -46,145 +26,174 @@ spec = describe "compute to source integration" $ do
                             , ""
                             , "#pragma STDC FP_CONTRACT OFF"
                             , ""
-                            , "void gemm(const float* input0, const float* input1, float* output, size_t symbol0, size_t symbol1, size_t symbol2) {"
+                            , "void copy(const float* input0, float* output0, size_t symbol0) {"
                             , "    for (size_t loop0 = 0; loop0 < symbol0; ++loop0) {"
-                            , "        for (size_t loop1 = 0; loop1 < symbol1; ++loop1) {"
-                            , "            float accumulator = 0.0f;"
-                            , "            for (size_t loop2 = 0; loop2 < symbol2; ++loop2) {"
-                            , "                float scalar1 = input0[((loop0) * symbol2 + loop2)];"
-                            , "                float scalar2 = input1[((loop2) * symbol1 + loop1)];"
-                            , "                float scalar3 = fmaf(scalar1, scalar2, accumulator);"
-                            , "                accumulator = scalar3;"
-                            , "            }"
-                            , "            output[((loop0) * symbol1 + loop1)] = accumulator;"
-                            , "        }"
+                            , "        float scalar0 = input0[loop0];"
+                            , "        output0[loop0] = scalar0;"
                             , "    }"
                             , "}"
                             ]
-                       , "gemm"
+                       , "copy"
                        )
 
-    it "preserves logical indices and guards the tail of a split CPU loop" $ do
-        let built = program #choose_by_column $ do
+    it "uses canonical split bindings and guards a CPU tail" $ do
+        let computeIR = program #choose_by_column $ do
                 let rows = staticDim 2
                 columns <- dim #columns
-                left <- input @F32 #left (rows, columns)
-                right <- input @F32 #right (rows, columns)
-                output <- compute #output (rows, columns) $ \(row, column) ->
-                    ( MatrixAxes row column
-                    , select
-                        (compare GreaterEqual (index column) (indexLiteral 4))
-                        (left ! (row, column))
-                        (right ! (row, column))
-                    )
-                entry output
-        Right chooseProgram <- pure built
-        Right chooseSchedule <- pure $ cpu chooseProgram $ \MatrixAxes{matrixColumnAxis} -> do
-            column <- loop matrixColumnAxis
-            _ <- split column 4
-            pure ()
-        let source = generateC chooseSchedule
-        (cSourceText source, cFunctionName source)
-            `shouldBe` ( unlines
-                            [ "#include <math.h>"
-                            , "#include <stdbool.h>"
-                            , "#include <stddef.h>"
-                            , ""
-                            , "#pragma STDC FP_CONTRACT OFF"
-                            , ""
-                            , "void choose_by_column(const float* input0, const float* input1, float* output, size_t symbol0) {"
-                            , "    for (size_t loop0 = 0; loop0 < 2; ++loop0) {"
-                            , "        for (size_t loop2 = 0; loop2 < ((symbol0) + 3u) / 4u; ++loop2) {"
-                            , "            for (size_t loop3 = 0; loop3 < 4; ++loop3) {"
-                            , "                if (((loop2 * 4u) + loop3) < symbol0) {"
-                            , "                    float scalar3 = input0[((loop0) * symbol0 + ((loop2 * 4u) + loop3))];"
-                            , "                    float scalar4 = input1[((loop0) * symbol0 + ((loop2 * 4u) + loop3))];"
-                            , "                    size_t scalar0 = ((loop2 * 4u) + loop3);"
-                            , "                    size_t scalar1 = 4u;"
-                            , "                    bool scalar2 = (scalar0 >= scalar1);"
-                            , "                    float scalar5 = (scalar2 ? scalar3 : scalar4);"
-                            , "                    output[((loop0) * symbol0 + ((loop2 * 4u) + loop3))] = scalar5;"
-                            , "                }"
-                            , "            }"
-                            , "        }"
-                            , "    }"
-                            , "}"
-                            ]
-                       , "choose_by_column"
-                       )
+                left <- input #left f32 [rows, columns]
+                right <- input #right f32 [rows, columns]
+                result <- output #result f32 [rows, columns]
+                block #choose $ do
+                    row <- spatial #row rows
+                    column <- spatial #column columns
+                    define result [row, column] $
+                        select
+                            (compare_ GreaterEqual (index column) (indexLiteral 4))
+                            (left ! [row, column])
+                            (right ! [row, column])
+            schedule = Schedule.cpu computeIR $ do
+                chooseBlock <- Schedule.block #choose
+                column <- Schedule.axis chooseBlock #column
+                _ <- Schedule.split column 4
+                pure ()
+            source = generateC schedule
+        cSourceText source
+            `shouldBe` unlines
+                [ "#include <math.h>"
+                , "#include <stdbool.h>"
+                , "#include <stddef.h>"
+                , ""
+                , "#pragma STDC FP_CONTRACT OFF"
+                , ""
+                , "void choose_by_column(const float* input0, const float* input1, float* output0, size_t symbol0) {"
+                , "    for (size_t loop0 = 0; loop0 < 2; ++loop0) {"
+                , "        for (size_t loop2 = 0; loop2 < ((symbol0) + 3u) / 4u; ++loop2) {"
+                , "            for (size_t loop3 = 0; loop3 < 4; ++loop3) {"
+                , "                if (((loop2 * 4u) + loop3) < symbol0) {"
+                , "                    size_t scalar0 = ((loop2 * 4u) + loop3);"
+                , "                    size_t scalar1 = 4u;"
+                , "                    bool scalar2 = (scalar0 >= scalar1);"
+                , "                    float scalar3 = input0[((loop0) * symbol0 + ((loop2 * 4u) + loop3))];"
+                , "                    float scalar4 = input1[((loop0) * symbol0 + ((loop2 * 4u) + loop3))];"
+                , "                    float scalar5 = (scalar2 ? scalar3 : scalar4);"
+                , "                    output0[((loop0) * symbol0 + ((loop2 * 4u) + loop3))] = scalar5;"
+                , "                }"
+                , "            }"
+                , "        }"
+                , "    }"
+                , "}"
+                ]
 
-    it "emits typed scalar literals, arithmetic, intrinsics, and selection" $ do
-        let built = program #scalar_ops $ do
-                let size = staticDim 1
-                output <- compute #output size $ \element ->
-                    ( VectorAxis element
-                    , select
-                        (compare LessThan (index element) (indexLiteral 1))
-                        (minimum (exp (f32 1.25 .+. f32 2.0)) (f32 3.0))
-                        (maximum (log (f32 4.0 .-. f32 5.0)) ((f32 6.0 .*. f32 7.0) ./. f32 8.0))
-                    )
-                entry output
-        Right scalarProgram <- pure built
-        Right scalarSchedule <- pure $ cpu scalarProgram (\_ -> pure ())
-        let source = generateC scalarSchedule
-        (cSourceText source, cFunctionName source)
-            `shouldBe` ( unlines
-                            [ "#include <math.h>"
-                            , "#include <stdbool.h>"
-                            , "#include <stddef.h>"
-                            , ""
-                            , "#pragma STDC FP_CONTRACT OFF"
-                            , ""
-                            , "void scalar_ops(float* output) {"
-                            , "    for (size_t loop0 = 0; loop0 < 1; ++loop0) {"
-                            , "        size_t scalar0 = loop0;"
-                            , "        size_t scalar1 = 1u;"
-                            , "        bool scalar2 = (scalar0 < scalar1);"
-                            , "        float scalar3 = 1.25f;"
-                            , "        float scalar4 = 2.0f;"
-                            , "        float scalar5 = (scalar3 + scalar4);"
-                            , "        float scalar6 = expf(scalar5);"
-                            , "        float scalar7 = 3.0f;"
-                            , "        float scalar8 = fminf(scalar6, scalar7);"
-                            , "        float scalar9 = 4.0f;"
-                            , "        float scalar10 = 5.0f;"
-                            , "        float scalar11 = (scalar9 - scalar10);"
-                            , "        float scalar12 = logf(scalar11);"
-                            , "        float scalar13 = 6.0f;"
-                            , "        float scalar14 = 7.0f;"
-                            , "        float scalar15 = (scalar13 * scalar14);"
-                            , "        float scalar16 = 8.0f;"
-                            , "        float scalar17 = (scalar15 / scalar16);"
-                            , "        float scalar18 = fmaxf(scalar12, scalar17);"
-                            , "        float scalar19 = (scalar2 ? scalar8 : scalar18);"
-                            , "        output[loop0] = scalar19;"
-                            , "    }"
-                            , "}"
-                            ]
-                       , "scalar_ops"
-                       )
+    it "lowers an explicitly defined reduction after split and reorder" $ do
+        let rows = staticDim 2
+            columns = staticDim 3
+            inner = staticDim 4
+            computeIR = program #matmul $ do
+                left <- input #left f32 [rows, inner]
+                right <- input #right f32 [inner, columns]
+                result <- output #result f32 [rows, columns]
+                block #matmul $ do
+                    row <- spatial #m rows
+                    column <- spatial #n columns
+                    reductionAxis <- reduction #k inner
+                    define result [row, column] $
+                        sumOver [reductionAxis] $
+                            left ! [row, reductionAxis] * right ! [reductionAxis, column]
+            schedule = Schedule.cpu computeIR $ do
+                matmulBlock <- Schedule.block #matmul
+                row <- Schedule.axis matmulBlock #m
+                column <- Schedule.axis matmulBlock #n
+                reductionAxis <- Schedule.axis matmulBlock #k
+                (rowOuter, rowInner) <- Schedule.split row 1
+                (columnOuter, columnInner) <- Schedule.split column 2
+                (reductionOuter, reductionInner) <- Schedule.split reductionAxis 2
+                Schedule.reorder matmulBlock [rowOuter, columnOuter, reductionOuter, rowInner, columnInner, reductionInner]
+            source = cSourceText (generateC schedule)
+        source
+            `shouldBe` unlines
+                [ "#include <math.h>"
+                , "#include <stdbool.h>"
+                , "#include <stddef.h>"
+                , ""
+                , "#pragma STDC FP_CONTRACT OFF"
+                , ""
+                , "void matmul(const float* input0, const float* input1, float* output0) {"
+                , "    for (size_t loop3 = 0; loop3 < ((2) + 0u) / 1u; ++loop3) {"
+                , "        for (size_t loop5 = 0; loop5 < ((3) + 1u) / 2u; ++loop5) {"
+                , "            for (size_t loop7 = 0; loop7 < ((4) + 1u) / 2u; ++loop7) {"
+                , "                for (size_t loop4 = 0; loop4 < 1; ++loop4) {"
+                , "                    for (size_t loop6 = 0; loop6 < 2; ++loop6) {"
+                , "                        for (size_t loop8 = 0; loop8 < 2; ++loop8) {"
+                , "                            if (((loop5 * 2u) + loop6) < 3) {"
+                , "                                if (((loop7 * 2u) + loop8) == 0) {"
+                , "                                    float scalar0 = 0.0f;"
+                , "                                    output0[((((loop3 * 1u) + loop4)) * 3 + ((loop5 * 2u) + loop6))] = scalar0;"
+                , "                                }"
+                , "                                float scalar1 = input0[((((loop3 * 1u) + loop4)) * 4 + ((loop7 * 2u) + loop8))];"
+                , "                                float scalar2 = input1[((((loop7 * 2u) + loop8)) * 3 + ((loop5 * 2u) + loop6))];"
+                , "                                float scalar3 = (scalar1 * scalar2);"
+                , "                                float scalar4 = output0[((((loop3 * 1u) + loop4)) * 3 + ((loop5 * 2u) + loop6))];"
+                , "                                float scalar5 = (scalar4 + scalar3);"
+                , "                                output0[((((loop3 * 1u) + loop4)) * 3 + ((loop5 * 2u) + loop6))] = scalar5;"
+                , "                            }"
+                , "                        }"
+                , "                    }"
+                , "                }"
+                , "            }"
+                , "        }"
+                , "    }"
+                , "}"
+                ]
 
-    it "generates CUDA source from a scoped schedule" $ do
-        let built = program #cuda_add $ do
-                let rows = staticDim 5
-                    columns = staticDim 10
-                left <- input @F32 #left (rows, columns)
-                right <- input @F32 #right (rows, columns)
-                output <- compute #output (rows, columns) $ \(row, column) ->
-                    (MatrixAxes row column, left ! (row, column) .+. right ! (row, column))
-                entry output
-        Right addProgram <- pure built
-        Right addSchedule <- pure $ cuda defaultCudaTarget addProgram $ \MatrixAxes{matrixRowAxis, matrixColumnAxis} -> do
-            row <- loop matrixRowAxis
-            column <- loop matrixColumnAxis
-            (blockY, threadY) <- split row 2
-            (blockX, threadX) <- split column 4
-            reorder [blockY, blockX, threadY, threadX]
-            bind blockY BlockY
-            bind blockX BlockX
-            bind threadY ThreadY
-            bind threadX ThreadX
-        let source = generateCuda addSchedule
+    it "renders CPU execution and unroll metadata" $ do
+        let computeIR = program #scaled $ do
+                inputTensor <- input #source f32 [staticDim 8]
+                result <- output #result f32 [staticDim 8]
+                block #scaled $ do
+                    element <- spatial #i (staticDim 8)
+                    define result [element] (inputTensor ! [element] * 2)
+            schedule = Schedule.cpu computeIR $ do
+                scaledBlock <- Schedule.block #scaled
+                element <- Schedule.axis scaledBlock #i
+                Schedule.parallel element
+                Schedule.unrollBy 4 element
+            generated = cSourceText (generateC schedule)
+        generated
+            `shouldBe` unlines
+                [ "#include <math.h>"
+                , "#include <stdbool.h>"
+                , "#include <stddef.h>"
+                , ""
+                , "#pragma STDC FP_CONTRACT OFF"
+                , ""
+                , "void scaled(const float* input0, float* output0) {"
+                , "    #pragma omp parallel for"
+                , "    #pragma GCC unroll 4"
+                , "    for (size_t loop0 = 0; loop0 < 8; ++loop0) {"
+                , "        float scalar0 = input0[loop0];"
+                , "        float scalar1 = 2.0f;"
+                , "        float scalar2 = (scalar0 * scalar1);"
+                , "        output0[loop0] = scalar2;"
+                , "    }"
+                , "}"
+                ]
+
+    it "generates CUDA source from bound split loops" $ do
+        let computeIR = program #cuda_add $ do
+                let size = staticDim 10
+                left <- input #left f32 [size]
+                right <- input #right f32 [size]
+                result <- output #result f32 [size]
+                block #add $ do
+                    element <- spatial #i size
+                    define result [element] (left ! [element] + right ! [element])
+            schedule = Schedule.cuda computeIR $ do
+                addBlock <- Schedule.block #add
+                element <- Schedule.axis addBlock #i
+                (blockX, threadX) <- Schedule.split element 4
+                Schedule.bind blockX Schedule.BlockX
+                Schedule.bind threadX Schedule.ThreadX
+            source = generateCuda schedule
         (cudaSourceText source, cudaKernelName source)
             `shouldBe` ( unlines
                             [ "#include <cuda_runtime.h>"
@@ -192,14 +201,42 @@ spec = describe "compute to source integration" $ do
                             , "#include <stdbool.h>"
                             , "#include <stddef.h>"
                             , ""
-                            , "__global__ void cuda_add(const float* input0, const float* input1, float* output) {"
-                            , "    if (((((size_t)blockIdx.x) * 4u) + ((size_t)threadIdx.x)) < 10 && ((((size_t)blockIdx.y) * 2u) + ((size_t)threadIdx.y)) < 5) {"
-                            , "        float scalar0 = input0[((((((size_t)blockIdx.y) * 2u) + ((size_t)threadIdx.y))) * 10 + ((((size_t)blockIdx.x) * 4u) + ((size_t)threadIdx.x)))];"
-                            , "        float scalar1 = input1[((((((size_t)blockIdx.y) * 2u) + ((size_t)threadIdx.y))) * 10 + ((((size_t)blockIdx.x) * 4u) + ((size_t)threadIdx.x)))];"
+                            , "__global__ void cuda_add(const float* input0, const float* input1, float* output0) {"
+                            , "    if (((((size_t)blockIdx.x) * 4u) + ((size_t)threadIdx.x)) < 10) {"
+                            , "        float scalar0 = input0[((((size_t)blockIdx.x) * 4u) + ((size_t)threadIdx.x))];"
+                            , "        float scalar1 = input1[((((size_t)blockIdx.x) * 4u) + ((size_t)threadIdx.x))];"
                             , "        float scalar2 = __fadd_rn(scalar0, scalar1);"
-                            , "        output[((((((size_t)blockIdx.y) * 2u) + ((size_t)threadIdx.y))) * 10 + ((((size_t)blockIdx.x) * 4u) + ((size_t)threadIdx.x)))] = scalar2;"
+                            , "        output0[((((size_t)blockIdx.x) * 4u) + ((size_t)threadIdx.x))] = scalar2;"
                             , "    }"
                             , "}"
                             ]
                        , "cuda_add"
                        )
+
+    it "renders CUDA unroll metadata on a lexical loop" $ do
+        let computeIR = program #cuda_copy $ do
+                inputTensor <- input #source f32 [staticDim 8]
+                result <- output #result f32 [staticDim 8]
+                block #copy $ do
+                    element <- spatial #i (staticDim 8)
+                    define result [element] (inputTensor ! [element])
+            schedule = Schedule.cuda computeIR $ do
+                copyBlock <- Schedule.block #copy
+                element <- Schedule.axis copyBlock #i
+                Schedule.unrollBy 2 element
+            generated = cudaSourceText (generateCuda schedule)
+        generated
+            `shouldBe` unlines
+                [ "#include <cuda_runtime.h>"
+                , "#include <math.h>"
+                , "#include <stdbool.h>"
+                , "#include <stddef.h>"
+                , ""
+                , "__global__ void cuda_copy(const float* input0, float* output0) {"
+                , "    #pragma unroll 2"
+                , "    for (size_t loop0 = 0; loop0 < 8; ++loop0) {"
+                , "        float scalar0 = input0[loop0];"
+                , "        output0[loop0] = scalar0;"
+                , "    }"
+                , "}"
+                ]

@@ -1,134 +1,121 @@
 {-# LANGUAGE OverloadedLabels #-}
-{-# LANGUAGE TypeApplications #-}
 
 module ComputeSpec (spec) where
 
 import           Aoewif.Compute
-import           Data.Functor         (void)
-import           GHC.OverloadedLabels (fromLabel)
-import           Prelude              hiding (compare, exp, log, maximum,
-                                       minimum)
 import           Test.Hspec
-
-newtype VectorAxis scope = VectorAxis (Axis scope Spatial)
-
-data VolumeAxes scope
-    = VolumeAxes
-        (Axis scope Spatial)
-        (Axis scope Spatial)
-        (Axis scope Spatial)
 
 spec :: Spec
 spec = describe "compute eDSL" $ do
-    it "constructs a scoped elementwise program" $ do
-        void
-            ( program #copy $ do
-                let size = staticDim 4
-                source <- input @F32 #source size
-                output <- compute #output size $ \element ->
-                    (VectorAxis element, source ! element)
-                entry output
-            )
-            `shouldBe` Right ()
+    it "elaborates matrix multiplication to a first-order reduction definition" $ do
+        let rows = staticDim 4
+            columns = staticDim 8
+            inner = staticDim 16
+            actual = program #matmul $ do
+                left <- input #left f32 [rows, inner]
+                right <- input #right f32 [inner, columns]
+                result <- output #result f32 [rows, columns]
+                block #matmul $ do
+                    row <- spatial #m rows
+                    column <- spatial #n columns
+                    reductionAxis <- reduction #k inner
+                    define result [row, column] $
+                        reduce add 0 [reductionAxis] $
+                            left ! [row, reductionAxis] * right ! [reductionAxis, column]
+            expected =
+                ComputeIR
+                    { computeName = #matmul
+                    , computeSymbols = []
+                    , computeTensors =
+                        [ TensorDecl (TensorId 0) #left F32Type [rows, inner] (InputTensor 0)
+                        , TensorDecl (TensorId 1) #right F32Type [inner, columns] (InputTensor 1)
+                        , TensorDecl (TensorId 2) #result F32Type [rows, columns] (OutputTensor 0)
+                        ]
+                    , computeBlocks =
+                        [ ComputeBlock
+                            { blockId = BlockId 0
+                            , blockName = #matmul
+                            , blockAxes =
+                                [ AxisDecl (AxisId 0) #m Spatial (StaticDim 0) rows
+                                , AxisDecl (AxisId 1) #n Spatial (StaticDim 0) columns
+                                , AxisDecl (AxisId 2) #k Reduction (StaticDim 0) inner
+                                ]
+                            , blockDefinitions =
+                                [ ReductionDef
+                                    { definitionTarget = TensorId 2
+                                    , definitionIndices = [AxisIndex (AxisId 0), AxisIndex (AxisId 1)]
+                                    , definitionReducer = AddReducer
+                                    , definitionIdentity = LiteralExpr (F32Literal 0)
+                                    , definitionReduceAxes = [AxisId 2]
+                                    , definitionValue =
+                                        MulExpr
+                                            (LoadExpr (TensorId 0) [AxisIndex (AxisId 0), AxisIndex (AxisId 2)])
+                                            (LoadExpr (TensorId 1) [AxisIndex (AxisId 2), AxisIndex (AxisId 1)])
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+        actual `shouldBe` expected
 
-    it "infers vector, matrix, and volume ranks from their shapes" $ do
-        void
-            ( program #ranked_shapes $ do
-                depth <- dim #depth
-                let rows = staticDim 3
-                    columns = staticDim 5
-                vector <- input @F32 #vector depth
-                matrix <- input @F32 #matrix (depth, rows)
-                volume <- input @F32 #volume (depth, rows, columns)
-                output <- compute #output (depth, rows, columns) $ \(depthAxis, rowAxis, columnAxis) ->
-                    ( VolumeAxes depthAxis rowAxis columnAxis
-                    , vector
-                        ! depthAxis
-                        .+. matrix
-                        ! (depthAxis, rowAxis)
-                        .+. volume
-                        ! (depthAxis, rowAxis, columnAxis)
-                    )
-                entry output
-            )
-            `shouldBe` Right ()
+    it "elaborates ReLU to a pointwise definition" $ do
+        let size = staticDim 32
+            actual = program #relu $ do
+                source <- input #source f32 [size]
+                result <- output #result f32 [size]
+                block #relu $ do
+                    element <- spatial #i size
+                    define result [element] (max_ 0 (source ! [element]))
+            expected =
+                ComputeIR
+                    { computeName = #relu
+                    , computeSymbols = []
+                    , computeTensors =
+                        [ TensorDecl (TensorId 0) #source F32Type [size] (InputTensor 0)
+                        , TensorDecl (TensorId 1) #result F32Type [size] (OutputTensor 0)
+                        ]
+                    , computeBlocks =
+                        [ ComputeBlock
+                            { blockId = BlockId 0
+                            , blockName = #relu
+                            , blockAxes = [AxisDecl (AxisId 0) #i Spatial (StaticDim 0) size]
+                            , blockDefinitions =
+                                [ PointwiseDef
+                                    { definitionTarget = TensorId 1
+                                    , definitionIndices = [AxisIndex (AxisId 0)]
+                                    , definitionValue =
+                                        MaxExpr
+                                            (LiteralExpr (F32Literal 0))
+                                            (LoadExpr (TensorId 0) [AxisIndex (AxisId 0)])
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+        actual `shouldBe` expected
 
-    it "lowers typed scalar literals, arithmetic, comparisons, and selection" $ do
-        void
-            ( program #scalar_expressions $ do
-                output <- compute #output (staticDim 4) $ \element ->
-                    ( VectorAxis element
-                    , select
-                        (boolean True)
-                        ( select
-                            (compare LessThan (index element) (indexLiteral 2))
-                            ( maximum
-                                ( minimum
-                                    (exp (log ((((f32 8 ./. f32 2) .*. f32 3) .-. f32 1) .+. f32 4)))
-                                    (f32 20)
-                                )
-                                (f32 0)
-                            )
-                            (fma (f32 2) (f32 3) (f32 4))
-                        )
-                        (f32 (-1))
-                    )
-                entry output
-            )
-            `shouldBe` Right ()
-
-    it "lowers a reduction fold with a typed accumulator" $ do
-        void
-            ( program #sum $ do
+    it "keeps declaration order separate from loop semantics" $ do
+        let actual = program #copy $ do
                 size <- dim #size
-                source <- input @F32 #source size
-                output <- compute #output (staticDim 1) $ \element ->
-                    ( VectorAxis element
-                    , foldOver size 0 $ \reductionAxis accumulator ->
-                        accumulator .+. source ! reductionAxis
-                    )
-                entry output
-            )
-            `shouldBe` Right ()
-
-    it "fails while lowering an inconsistent tensor access" $ do
-        void
-            ( program #mismatched_shape $ do
-                rows <- dim #rows
-                columns <- dim #columns
-                source <- input @F32 #source rows
-                output <- compute #output columns $ \column ->
-                    (VectorAxis column, source ! column)
-                entry output
-            )
-            `shouldBe` Left DimensionMismatch
-
-    it "fails while lowering a reduction over the wrong tensor dimension" $ do
-        void
-            ( program #mismatched_reduction $ do
-                sourceSize <- dim #source_size
-                reductionSize <- dim #reduction_size
-                source <- input @F32 #source sourceSize
-                output <- compute #output (staticDim 1) $ \element ->
-                    ( VectorAxis element
-                    , foldOver reductionSize 0 $ \reductionAxis accumulator ->
-                        accumulator .+. source ! reductionAxis
-                    )
-                entry output
-            )
-            `shouldBe` Left DimensionMismatch
-
-    it "rejects an invalid generated-function identifier at the input boundary" $ do
-        void
-            ( program (fromLabel @"invalid-name") $ do
-                let size = staticDim 1
-                output <- compute #output size $ \element ->
-                    ( VectorAxis element
-                    , select
-                        (compare Equal (index element) (indexLiteral 0))
-                        (f32 0)
-                        (f32 0)
-                    )
-                entry output
-            )
-            `shouldBe` Left (InvalidFunctionIdentifier "invalid-name")
+                source <- input #source f32 [size]
+                result <- output #result f32 [size]
+                block #copy $ do
+                    element <- spatial #element size
+                    define result [element] (source ! [element])
+            expected =
+                ComputeIR
+                    { computeName = #copy
+                    , computeSymbols = [Symbol (SymbolId 0) #size]
+                    , computeTensors =
+                        [ TensorDecl (TensorId 0) #source F32Type [SymbolDim (SymbolId 0)] (InputTensor 0)
+                        , TensorDecl (TensorId 1) #result F32Type [SymbolDim (SymbolId 0)] (OutputTensor 0)
+                        ]
+                    , computeBlocks =
+                        [ ComputeBlock
+                            (BlockId 0)
+                            #copy
+                            [AxisDecl (AxisId 0) #element Spatial (StaticDim 0) (SymbolDim (SymbolId 0))]
+                            [PointwiseDef (TensorId 1) [AxisIndex (AxisId 0)] (LoadExpr (TensorId 0) [AxisIndex (AxisId 0)])]
+                        ]
+                    }
+        actual `shouldBe` expected
