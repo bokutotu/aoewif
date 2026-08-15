@@ -87,3 +87,7 @@ ParentParent
     A
     B
 ```
+
+## Linting
+
+Run the project's linter and apply its fixes instead of manually patching lint warnings.
