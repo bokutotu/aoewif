@@ -2,10 +2,11 @@
 {-# LANGUAGE RoleAnnotations #-}
 
 module Aoewif.Cuda (
+    Name (..),
     Builder,
     BuildError (..),
     Buffer,
-    BufferAccess (..),
+    Access (..),
     Extent,
     Index,
     Predicate,
@@ -35,32 +36,32 @@ module Aoewif.Cuda (
     divide,
 ) where
 
-import           Aoewif.Cuda.IR (BufferAccess (..))
+import           Aoewif.Cuda.IR (Access (..), Name (..))
 import qualified Aoewif.Cuda.IR as IR
 import           Data.Char      (isAsciiLower, isAsciiUpper, isDigit)
 import           Data.Word      (Word32, Word64)
 
 data BuildError
-    = InvalidIdentifier String
-    | DuplicateIdentifier String
-    | InvalidRank String
-    | RankMismatch String Int Int
+    = InvalidIdentifier Name
+    | DuplicateIdentifier Name
+    | InvalidRank Name
+    | RankMismatch Name Int Int
     | NonPositiveExtent String
     | ZeroCeilDivisor
     | NonPositiveThreadCount
     | ThreadCountExceedsLimit Word32
     | MissingLaunch
     | MultipleLaunches
-    | DeclarationInsideLaunch String
-    | DeclarationAfterLaunch String
+    | DeclarationInsideLaunch Name
+    | DeclarationAfterLaunch Name
     | OperationOutsideLaunch String
-    | SharedInsideSerial String
-    | SharedInsideConditional String
+    | SharedInsideSerial Name
+    | SharedInsideConditional Name
     | SyncThreadsInsideConditional
-    | SharedSizeOverflow String
+    | SharedSizeOverflow Name
     deriving stock (Eq, Show)
 
-data Buffer scope (access :: BufferAccess) = Buffer IR.BufferId String [IR.Extent]
+data Buffer scope (access :: Access) = Buffer IR.BufferId Name [IR.Extent]
 
 type role Buffer nominal nominal
 
@@ -89,7 +90,7 @@ data BuildState = BuildState
     , stateGlobalBuffers   :: [IR.BufferDecl]
     , stateLaunch          :: Maybe (IR.Launch, [IR.Statement])
     , stateStatements      :: [IR.Statement]
-    , stateUsedIdentifiers :: [String]
+    , stateUsedIdentifiers :: [Name]
     , stateLocation        :: BuildLocation
     , stateNextSymbol      :: !Int
     , stateNextBuffer      :: !Int
@@ -120,7 +121,7 @@ instance Monad (Builder scope) where
         (value, nextState) <- action state
         runBuilder (next value) nextState
 
-kernel :: String -> (forall scope. Builder scope ()) -> Either BuildError IR.Kernel
+kernel :: Name -> (forall scope. Builder scope ()) -> Either BuildError IR.Kernel
 kernel name build = do
     checkIdentifier name
     (_, finalState) <- runBuilder build (initialState name)
@@ -139,7 +140,7 @@ kernel name build = do
 staticExtent :: Word64 -> Extent scope
 staticExtent = Extent . IR.StaticExtent
 
-dynamicExtent :: String -> Builder scope (Extent scope)
+dynamicExtent :: Name -> Builder scope (Extent scope)
 dynamicExtent name = Builder $ \state -> do
     declarationState <- prepareDeclaration name state
     let identifier = IR.SymbolId (stateNextSymbol declarationState)
@@ -158,10 +159,10 @@ ceilDiv (Extent dividend) divisor = Builder $ \state ->
         then Left ZeroCeilDivisor
         else Right (Extent (IR.CeilDivExtent dividend divisor), state)
 
-input :: String -> [Extent scope] -> Builder scope (Buffer scope 'ReadOnly)
+input :: Name -> [Extent scope] -> Builder scope (Buffer scope 'ReadOnly)
 input = declareBuffer ReadOnly
 
-output :: String -> [Extent scope] -> Builder scope (Buffer scope 'ReadWrite)
+output :: Name -> [Extent scope] -> Builder scope (Buffer scope 'ReadWrite)
 output = declareBuffer ReadWrite
 
 launch1D :: Extent scope -> Word32 -> (Index scope -> Index scope -> Builder scope ()) -> Builder scope ()
@@ -238,7 +239,7 @@ when (Predicate predicate) build = Builder $ \state -> do
             }
         )
 
-shared :: String -> [Word64] -> (Buffer scope 'ReadWrite -> Builder scope ()) -> Builder scope ()
+shared :: Name -> [Word64] -> (Buffer scope 'ReadWrite -> Builder scope ()) -> Builder scope ()
 shared name staticShape build = Builder $ \state -> do
     (serialDepth, conditionalDepth) <- launchDepths "shared" state
     case () of
@@ -331,7 +332,7 @@ mul (F32 lhs) (F32 rhs) = F32 (IR.MulF32 lhs rhs)
 divide :: F32 scope -> F32 scope -> F32 scope
 divide (F32 lhs) (F32 rhs) = F32 (IR.DivF32 lhs rhs)
 
-initialState :: String -> BuildState
+initialState :: Name -> BuildState
 initialState name =
     BuildState
         { stateSymbols = []
@@ -346,7 +347,7 @@ initialState name =
         , stateNextLoop = 0
         }
 
-declareBuffer :: BufferAccess -> String -> [Extent scope] -> Builder scope (Buffer scope access)
+declareBuffer :: Access -> Name -> [Extent scope] -> Builder scope (Buffer scope access)
 declareBuffer access name extents = Builder $ \state -> do
     declarationState <- prepareDeclaration name state
     let shape = map (\(Extent extent) -> extent) extents
@@ -361,7 +362,7 @@ declareBuffer access name extents = Builder $ \state -> do
             }
         )
 
-prepareDeclaration :: String -> BuildState -> Either BuildError BuildState
+prepareDeclaration :: Name -> BuildState -> Either BuildError BuildState
 prepareDeclaration name state = do
     case stateLocation state of
         LaunchBody _ _ -> Left (DeclarationInsideLaunch name)
@@ -384,7 +385,7 @@ launchDepths operation state = case stateLocation state of
     TopLevel -> Left (OperationOutsideLaunch operation)
     LaunchBody serialDepth conditionalDepth -> Right (serialDepth, conditionalDepth)
 
-bufferAddress :: String -> [IR.Extent] -> [Index scope] -> Either BuildError IR.IndexExpr
+bufferAddress :: Name -> [IR.Extent] -> [Index scope] -> Either BuildError IR.IndexExpr
 bufferAddress name shape indices
     | expectedRank /= actualRank =
         Left (RankMismatch name expectedRank actualRank)
@@ -404,15 +405,15 @@ flattenAddress shape (firstIndex : remainingIndices) =
             (IR.MulIndex address (IR.ExtentIndex extent))
             nextIndex
 
-checkShape :: String -> [IR.Extent] -> Either BuildError ()
+checkShape :: Name -> [IR.Extent] -> Either BuildError ()
 checkShape name shape
     | null shape = Left (InvalidRank name)
-    | otherwise = mapM_ (checkExtent ("buffer " ++ name)) shape
+    | otherwise = mapM_ (checkExtent ("buffer " ++ nameText name)) shape
 
-checkSharedShape :: String -> [Word64] -> Either BuildError ()
+checkSharedShape :: Name -> [Word64] -> Either BuildError ()
 checkSharedShape name shape
     | null shape = Left (InvalidRank name)
-    | 0 `elem` shape = Left (NonPositiveExtent ("shared buffer " ++ name))
+    | 0 `elem` shape = Left (NonPositiveExtent ("shared buffer " ++ nameText name))
     | otherwise = checkedProduct 4 shape
   where
     checkedProduct _ [] = Right ()
@@ -428,20 +429,24 @@ checkExtent context extent = case extent of
     IR.CeilDivExtent dividend 0 -> checkExtent context dividend >> Left ZeroCeilDivisor
     IR.CeilDivExtent dividend _ -> checkExtent context dividend
 
-checkUnusedIdentifier :: String -> BuildState -> Either BuildError ()
+checkUnusedIdentifier :: Name -> BuildState -> Either BuildError ()
 checkUnusedIdentifier name state
     | name `elem` stateUsedIdentifiers state = Left (DuplicateIdentifier name)
     | otherwise = Right ()
 
-checkIdentifier :: String -> Either BuildError ()
+checkIdentifier :: Name -> Either BuildError ()
 checkIdentifier name
     | not (validIdentifier name) = Left (InvalidIdentifier name)
     | otherwise = Right ()
 
-validIdentifier :: String -> Bool
-validIdentifier [] = False
-validIdentifier (first : rest) = identifierStart first && all identifierContinue rest
+validIdentifier :: Name -> Bool
+validIdentifier (Name name) = case name of
+    []           -> False
+    first : rest -> identifierStart first && all identifierContinue rest
   where
     identifierStart character =
         isAsciiLower character || isAsciiUpper character || character == '_'
     identifierContinue character = identifierStart character || isDigit character
+
+nameText :: Name -> String
+nameText (Name name) = name

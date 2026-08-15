@@ -1,9 +1,10 @@
 module Aoewif.Cuda.IR (
+    Name (..),
     SymbolId (..),
     BufferId (..),
     ValueId (..),
     LoopId (..),
-    BufferAccess (..),
+    Access (..),
     Extent (..),
     Symbol (..),
     BufferDecl (..),
@@ -16,24 +17,15 @@ module Aoewif.Cuda.IR (
     Kernel (..),
 ) where
 
-import           Data.Word (Word32, Word64)
+import           Aoewif.Access   (Access (..))
+import           Aoewif.BufferId (BufferId (..))
+import           Aoewif.LoopId   (LoopId (..))
+import           Aoewif.Name     (Name (..))
+import           Aoewif.ValueId  (ValueId (..))
+import           Data.Word       (Word32, Word64)
 
 newtype SymbolId = SymbolId Int
     deriving stock (Eq, Ord, Show)
-
-newtype BufferId = BufferId Int
-    deriving stock (Eq, Ord, Show)
-
-newtype ValueId = ValueId Int
-    deriving stock (Eq, Ord, Show)
-
-newtype LoopId = LoopId Int
-    deriving stock (Eq, Ord, Show)
-
-data BufferAccess
-    = ReadOnly
-    | ReadWrite
-    deriving stock (Eq, Show)
 
 data Extent
     = StaticExtent Word64
@@ -43,21 +35,21 @@ data Extent
 
 data Symbol = Symbol
     { symbolId   :: SymbolId
-    , symbolName :: String
+    , symbolName :: Name
     }
     deriving stock (Eq, Show)
 
 data BufferDecl = BufferDecl
     { bufferId     :: BufferId
-    , bufferName   :: String
-    , bufferAccess :: BufferAccess
+    , bufferName   :: Name
+    , bufferAccess :: Access
     , bufferShape  :: [Extent]
     }
     deriving stock (Eq, Show)
 
 data SharedDecl = SharedDecl
     { sharedBufferId :: BufferId
-    , sharedName     :: String
+    , sharedName     :: Name
     , sharedShape    :: [Word64]
     }
     deriving stock (Eq, Show)
@@ -102,7 +94,7 @@ data Statement
     deriving stock (Eq, Show)
 
 data Kernel = Kernel
-    { kernelName    :: String
+    { kernelName    :: Name
     , kernelSymbols :: [Symbol]
     , kernelBuffers :: [BufferDecl]
     , kernelLaunch  :: Launch

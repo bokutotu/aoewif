@@ -58,16 +58,16 @@ renderKernel kernelIR =
 
 bufferParameter :: IR.BufferDecl -> String
 bufferParameter buffer = case IR.bufferAccess buffer of
-    IR.ReadOnly  -> "const float* " ++ IR.bufferName buffer
-    IR.ReadWrite -> "float* " ++ IR.bufferName buffer
+    IR.ReadOnly  -> "const float* " ++ nameText (IR.bufferName buffer)
+    IR.ReadWrite -> "float* " ++ nameText (IR.bufferName buffer)
 
 symbolParameter :: IR.Symbol -> String
-symbolParameter symbol = "size_t " ++ IR.symbolName symbol
+symbolParameter symbol = "size_t " ++ nameText (IR.symbolName symbol)
 
-renderStatements :: [IR.Symbol] -> [(IR.BufferId, String)] -> Int -> [IR.Statement] -> String
+renderStatements :: [IR.Symbol] -> [(IR.BufferId, IR.Name)] -> Int -> [IR.Statement] -> String
 renderStatements symbols buffers indentation = concatMap (renderStatement symbols buffers indentation)
 
-renderStatement :: [IR.Symbol] -> [(IR.BufferId, String)] -> Int -> IR.Statement -> String
+renderStatement :: [IR.Symbol] -> [(IR.BufferId, IR.Name)] -> Int -> IR.Statement -> String
 renderStatement symbols buffers indentation statement = case statement of
     IR.LetF32 identifier expression ->
         indent indentation
@@ -111,7 +111,7 @@ renderStatement symbols buffers indentation statement = case statement of
             ++ "{\n"
             ++ indent (indentation + 1)
             ++ "__shared__ float "
-            ++ IR.sharedName declaration
+            ++ nameText (IR.sharedName declaration)
             ++ "["
             ++ show (staticElementCount (IR.sharedShape declaration))
             ++ "ull];\n"
@@ -124,7 +124,7 @@ renderStatement symbols buffers indentation statement = case statement of
             ++ "}\n"
     IR.SyncThreads -> indent indentation ++ "__syncthreads();\n"
 
-renderF32 :: [IR.Symbol] -> [(IR.BufferId, String)] -> IR.F32Expr -> String
+renderF32 :: [IR.Symbol] -> [(IR.BufferId, IR.Name)] -> IR.F32Expr -> String
 renderF32 symbols buffers expression = case expression of
     IR.F32Literal value -> floatLiteral value
     IR.F32Value identifier -> valueName identifier
@@ -195,12 +195,12 @@ staticElementCount :: [Word64] -> Integer
 staticElementCount = product . map toInteger
 
 symbolName :: [IR.Symbol] -> IR.SymbolId -> String
-symbolName symbols identifier = IR.symbolName (fromJust (lookup identifier symbolNames))
+symbolName symbols identifier = nameText (IR.symbolName (fromJust (lookup identifier symbolNames)))
   where
     symbolNames = map (\symbol -> (IR.symbolId symbol, symbol)) symbols
 
-bufferName :: [(IR.BufferId, String)] -> IR.BufferId -> String
-bufferName buffers identifier = fromJust (lookup identifier buffers)
+bufferName :: [(IR.BufferId, IR.Name)] -> IR.BufferId -> String
+bufferName buffers identifier = nameText (fromJust (lookup identifier buffers))
 
 valueName :: IR.ValueId -> String
 valueName (IR.ValueId identifier) = "value" ++ show identifier
@@ -209,7 +209,10 @@ loopName :: IR.LoopId -> String
 loopName (IR.LoopId identifier) = "loop" ++ show identifier
 
 sourceKernelName :: IR.Kernel -> String
-sourceKernelName = IR.kernelName
+sourceKernelName = nameText . IR.kernelName
+
+nameText :: IR.Name -> String
+nameText (IR.Name name) = name
 
 indent :: Int -> String
 indent level = replicate (level * 4) ' '

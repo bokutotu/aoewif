@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedLabels #-}
+
 module CudaSpec (spec) where
 
 import qualified Aoewif.Cuda         as Cuda
@@ -7,10 +9,10 @@ import           Test.Hspec
 spec :: Spec
 spec = describe "CUDA eDSL and code generation" $ do
     it "generates a guarded CUDA kernel" $ do
-        Right cudaKernel <- pure $ Cuda.kernel "vector_copy" $ do
-            size <- Cuda.dynamicExtent "size"
-            source <- Cuda.input "source" [size]
-            result <- Cuda.output "result" [size]
+        Right cudaKernel <- pure $ Cuda.kernel #vector_copy $ do
+            size <- Cuda.dynamicExtent #size
+            source <- Cuda.input #source [size]
+            result <- Cuda.output #result [size]
             grid <- Cuda.ceilDiv size 256
             Cuda.launch1D grid 256 $ \blockIndex threadIndex -> do
                 let globalIndex =
@@ -35,12 +37,12 @@ spec = describe "CUDA eDSL and code generation" $ do
                 ]
 
     it "generates a static shared-memory kernel" $ do
-        Right cudaKernel <- pure $ Cuda.kernel "shared_stage" $ do
+        Right cudaKernel <- pure $ Cuda.kernel #shared_stage $ do
             let size = Cuda.staticExtent 256
-            source <- Cuda.input "source" [size]
-            result <- Cuda.output "result" [size]
+            source <- Cuda.input #source [size]
+            result <- Cuda.output #result [size]
             Cuda.launch1D (Cuda.staticExtent 1) 256 $ \_ threadIndex ->
-                Cuda.shared "tile" [256] $ \tile -> do
+                Cuda.shared #tile [256] $ \tile -> do
                     value <- Cuda.load source [threadIndex]
                     Cuda.store tile [threadIndex] value
                     Cuda.syncThreads
@@ -65,8 +67,8 @@ spec = describe "CUDA eDSL and code generation" $ do
                 ]
 
     it "renders overflow-safe ceil division in a serial loop" $ do
-        Right cudaKernel <- pure $ Cuda.kernel "ceil_loop" $ do
-            size <- Cuda.dynamicExtent "size"
+        Right cudaKernel <- pure $ Cuda.kernel #ceil_loop $ do
+            size <- Cuda.dynamicExtent #size
             tiles <- Cuda.ceilDiv size 256
             Cuda.launch1D (Cuda.staticExtent 1) 1 $ \_ _ ->
                 Cuda.serial tiles (const (pure ()))

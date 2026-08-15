@@ -37,7 +37,7 @@ newtype Buffer scope (access :: Access) = Buffer IR.Buffer
 
 type role Buffer nominal nominal
 
-newtype Index scope = Index IR.IndexId
+newtype Index scope = Index IR.LoopId
 
 type role Index nominal
 
@@ -60,7 +60,7 @@ data BuildState = BuildState
     , stateStatements  :: [IR.Statement]
     , stateIdentifiers :: [Name]
     , stateNextBuffer  :: !Int
-    , stateNextIndex   :: !Int
+    , stateNextLoop    :: !Int
     , stateNextValue   :: !Int
     }
 
@@ -146,12 +146,12 @@ buildLoop kind name extent action = do
     ensureKnownExtent extent
     registerIdentifier name
     Cpu $ \state ->
-        let identifier = IR.IndexId (stateNextIndex state)
+        let identifier = IR.LoopId (stateNextLoop state)
             outerStatements = stateStatements state
             bodyState =
                 state
                     { stateStatements = []
-                    , stateNextIndex = stateNextIndex state + 1
+                    , stateNextLoop = stateNextLoop state + 1
                     }
          in do
                 (_, finalBodyState) <- runCpu (action (Index identifier)) bodyState
@@ -282,7 +282,7 @@ localSizeFits = go 4
         bytes <= maxBound `div` dimension
             && go (bytes * dimension) remaining
 
-unwrapIndex :: Index scope -> IR.IndexId
+unwrapIndex :: Index scope -> IR.LoopId
 unwrapIndex (Index identifier) = identifier
 
 validIdentifier :: Name -> Bool

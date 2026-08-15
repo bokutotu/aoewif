@@ -56,11 +56,11 @@ functionDeclaration programIR =
         IR.ReadWrite -> "float* " ++ sourceBufferName buffer
     extentParameter name = "size_t " ++ extentName name
 
-renderStatements :: [(IR.BufferId, IR.Buffer)] -> [(IR.IndexId, IR.Name)] -> Int -> [IR.Statement] -> [String]
+renderStatements :: [(IR.BufferId, IR.Buffer)] -> [(IR.LoopId, IR.Name)] -> Int -> [IR.Statement] -> [String]
 renderStatements buffers indices indentation =
     concatMap (renderStatement buffers indices indentation)
 
-renderStatement :: [(IR.BufferId, IR.Buffer)] -> [(IR.IndexId, IR.Name)] -> Int -> IR.Statement -> [String]
+renderStatement :: [(IR.BufferId, IR.Buffer)] -> [(IR.LoopId, IR.Name)] -> Int -> IR.Statement -> [String]
 renderStatement buffers indices indentation statement = case statement of
     IR.Let valueIdentifier bufferIdentifier accessIndices ->
         [ indent indentation
@@ -128,7 +128,7 @@ renderExpr expression = case expression of
     binary operator lhs rhs =
         "(" ++ renderExpr lhs ++ " " ++ operator ++ " " ++ renderExpr rhs ++ ")"
 
-bufferAccess :: [(IR.BufferId, IR.Buffer)] -> [(IR.IndexId, IR.Name)] -> IR.BufferId -> [IR.IndexId] -> String
+bufferAccess :: [(IR.BufferId, IR.Buffer)] -> [(IR.LoopId, IR.Name)] -> IR.BufferId -> [IR.LoopId] -> String
 bufferAccess buffers indices identifier accessIndices =
     sourceBufferName buffer
         ++ "["
@@ -137,7 +137,7 @@ bufferAccess buffers indices identifier accessIndices =
   where
     buffer = fromJust (lookup identifier buffers)
 
-rowMajorAddress :: [(IR.IndexId, IR.Name)] -> [IR.Extent] -> [IR.IndexId] -> String
+rowMajorAddress :: [(IR.LoopId, IR.Name)] -> [IR.Extent] -> [IR.LoopId] -> String
 rowMajorAddress indices shape accessIndices = case map (indexName indices) accessIndices of
     [] -> "0"
     first : remaining ->
@@ -179,7 +179,7 @@ sourceBufferName = nameText . IR.bufferName
 sourceLoopName :: IR.Loop -> String
 sourceLoopName = nameText . IR.loopName
 
-indexName :: [(IR.IndexId, IR.Name)] -> IR.IndexId -> String
+indexName :: [(IR.LoopId, IR.Name)] -> IR.LoopId -> String
 indexName indices identifier = nameText (fromJust (lookup identifier indices))
 
 extentName :: IR.Name -> String

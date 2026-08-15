@@ -1,7 +1,7 @@
 module Aoewif.Cpu.IR (
     Name (..),
     BufferId (..),
-    IndexId (..),
+    LoopId (..),
     ValueId (..),
     Access (..),
     Extent (..),
@@ -13,30 +13,12 @@ module Aoewif.Cpu.IR (
     Program (..),
 ) where
 
-import           Data.Proxy           (Proxy (..))
-import           Data.Word            (Word64)
-import           GHC.OverloadedLabels (IsLabel (..))
-import           GHC.TypeLits         (KnownSymbol, symbolVal)
-
-newtype Name = Name String
-    deriving stock (Eq, Ord, Show)
-
-instance (KnownSymbol label) => IsLabel label Name where
-    fromLabel = Name (symbolVal (Proxy @label))
-
-newtype BufferId = BufferId Int
-    deriving stock (Eq, Ord, Show)
-
-newtype IndexId = IndexId Int
-    deriving stock (Eq, Ord, Show)
-
-newtype ValueId = ValueId Int
-    deriving stock (Eq, Ord, Show)
-
-data Access
-    = ReadOnly
-    | ReadWrite
-    deriving stock (Eq, Show)
+import           Aoewif.Access   (Access (..))
+import           Aoewif.BufferId (BufferId (..))
+import           Aoewif.LoopId   (LoopId (..))
+import           Aoewif.Name     (Name (..))
+import           Aoewif.ValueId  (ValueId (..))
+import           Data.Word       (Word64)
 
 data Extent
     = StaticExtent Word64
@@ -67,7 +49,7 @@ data LoopKind
 
 data Loop = Loop
     { loopKind   :: LoopKind
-    , loopIndex  :: IndexId
+    , loopIndex  :: LoopId
     , loopName   :: Name
     , loopExtent :: Extent
     , loopBody   :: [Statement]
@@ -75,8 +57,8 @@ data Loop = Loop
     deriving stock (Eq, Show)
 
 data Statement
-    = Let ValueId BufferId [IndexId]
-    | Store BufferId [IndexId] Expr
+    = Let ValueId BufferId [LoopId]
+    | Store BufferId [LoopId] Expr
     | For Loop
     | Allocate Buffer [Statement]
     deriving stock (Eq, Show)
