@@ -16,17 +16,9 @@ ghc-options:
 library:
   source-dirs: src
   exposed-modules:
-    - Aoewif.Access
-    - Aoewif.BufferId
-    - Aoewif.Cpu
-    - Aoewif.Cpu.Codegen
-    - Aoewif.Cpu.IR
     - Aoewif.Cuda
     - Aoewif.Cuda.Codegen
     - Aoewif.Cuda.IR
-    - Aoewif.LoopId
-    - Aoewif.Name
-    - Aoewif.ValueId
 
 tests:
   aoewif-test:
