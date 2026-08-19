@@ -1,5 +1,6 @@
 dist-newstyle
 .direnv
+.cache-nix
 /.pre-commit-config.yaml
 /aoewif.cabal
 *tags
