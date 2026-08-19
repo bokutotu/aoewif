@@ -156,10 +156,13 @@ renderExpr expr =
                 ++ ")"
 
 renderBinaryOp :: Syntax.BinaryOp -> String
-renderBinaryOp Syntax.Assign   = "="
-renderBinaryOp Syntax.Add      = "+"
-renderBinaryOp Syntax.Multiply = "*"
-renderBinaryOp Syntax.LessThan = "<"
+renderBinaryOp Syntax.Assign     = "="
+renderBinaryOp Syntax.Add        = "+"
+renderBinaryOp Syntax.Multiply   = "*"
+renderBinaryOp Syntax.LessThan   = "<"
+renderBinaryOp Syntax.ShiftRight = ">>"
+renderBinaryOp Syntax.BitAnd     = "&"
+renderBinaryOp Syntax.BitXor     = "^"
 
 renderFloatLit :: Float -> String
 renderFloatLit value

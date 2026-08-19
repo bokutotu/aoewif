@@ -53,6 +53,20 @@ spec =
 
                            """
 
+        it "renders XOR-swizzled shared addresses" $ do
+            Codegen.generate
+                ( kernel "swizzled" $ body $ do
+                    tile <- shared F32 "tile" (int 128)
+                    tile ! swizzle 3 7 (threadIdxX .+ int 16) .= int 0
+                )
+                `shouldBe` """
+                           extern "C" __global__ void swizzled() {
+                               __shared__ float tile[128];
+                               (tile[((threadIdx.x + 16) ^ (((threadIdx.x + 16) >> 3) & 7))] = 0);
+                           }
+
+                           """
+
         it "renders configured half-precision types and headers" $ do
             Codegen.generateWith
                 ( Codegen.Config

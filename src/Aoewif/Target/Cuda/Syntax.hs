@@ -66,6 +66,9 @@ data BinaryOp
     | Add
     | Multiply
     | LessThan
+    | ShiftRight
+    | BitAnd
+    | BitXor
     deriving stock (Eq, Show)
 
 data Expr

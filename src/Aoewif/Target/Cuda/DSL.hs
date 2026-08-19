@@ -29,6 +29,7 @@ module Aoewif.Target.Cuda.DSL (
     parameter,
     shared,
     syncThreads,
+    swizzle,
     threadIdxX,
     threadIdxY,
     threadIdxZ,
@@ -38,6 +39,9 @@ module Aoewif.Target.Cuda.DSL (
     (.+),
     (.=),
     (.<),
+    (.>>),
+    (.&),
+    (.^),
 )
 where
 
@@ -111,6 +115,10 @@ float = FloatLit
 cast :: Type -> Expr -> Expr
 cast targetType = Unary (StaticCast targetType)
 
+swizzle :: Int -> Int -> Expr -> Expr
+swizzle shift mask index =
+    index .^ ((index .>> int (fromIntegral shift)) .& int (fromIntegral mask))
+
 call :: Expr -> [Expr] -> Expr
 call = Call
 
@@ -161,6 +169,21 @@ infix 4 .<
 
 (.<) :: Expr -> Expr -> Expr
 (.<) = Binary LessThan
+
+infixl 5 .>>
+
+(.>>) :: Expr -> Expr -> Expr
+(.>>) = Binary ShiftRight
+
+infixl 3 .&
+
+(.&) :: Expr -> Expr -> Expr
+(.&) = Binary BitAnd
+
+infixl 2 .^
+
+(.^) :: Expr -> Expr -> Expr
+(.^) = Binary BitXor
 
 infix 1 .=
 
