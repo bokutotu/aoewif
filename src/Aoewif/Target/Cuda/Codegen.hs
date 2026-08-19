@@ -1,20 +1,46 @@
 module Aoewif.Target.Cuda.Codegen (
+    Config (..),
+    Include (..),
     generate,
+    generateWith,
 )
 where
 
 import qualified Aoewif.Target.Cuda.Syntax as Syntax
 import           Data.List                 (intercalate)
 
+data Include
+    = CudaFp16Header
+    | CudaBf16Header
+    deriving stock (Eq, Show)
+
+newtype Config = Config
+    { includes :: [Include]
+    }
+    deriving stock (Eq, Show)
+
 generate :: Syntax.Kernel -> String
-generate (Syntax.Kernel name parameters body) =
-    "extern \"C\" __global__ void "
+generate = generateWith (Config [])
+
+generateWith :: Config -> Syntax.Kernel -> String
+generateWith config (Syntax.Kernel name parameters body) =
+    renderIncludes (includes config)
+        ++ "extern \"C\" __global__ void "
         ++ renderName name
         ++ "("
         ++ intercalate ", " (map renderParameter parameters)
         ++ ") {\n"
         ++ renderStmts 1 body
         ++ "}\n"
+
+renderIncludes :: [Include] -> String
+renderIncludes [] = ""
+renderIncludes configuredIncludes =
+    unlines (map renderInclude configuredIncludes) ++ "\n"
+
+renderInclude :: Include -> String
+renderInclude CudaFp16Header = "#include <cuda_fp16.h>"
+renderInclude CudaBf16Header = "#include <cuda_bf16.h>"
 
 renderParameter :: Syntax.Parameter -> String
 renderParameter (Syntax.Parameter parameterType name) =
@@ -24,6 +50,8 @@ renderType :: Syntax.Type -> String
 renderType Syntax.Bool = "bool"
 renderType Syntax.U32 = "uint32_t"
 renderType Syntax.USize = "size_t"
+renderType Syntax.F16 = "__half"
+renderType Syntax.BF16 = "__nv_bfloat16"
 renderType Syntax.F32 = "float"
 renderType (Syntax.Const valueType) =
     renderType valueType ++ " const"

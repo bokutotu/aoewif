@@ -51,6 +51,36 @@ spec =
                     , "}"
                     ]
 
+        it "renders configured half-precision types and headers" $ do
+            Codegen.generateWith
+                ( Codegen.Config
+                    [ Codegen.CudaFp16Header
+                    , Codegen.CudaBf16Header
+                    ]
+                )
+                ( kernel "half_types" $ do
+                    source <- parameter (Pointer (Const F16)) "source"
+                    result <- parameter (Pointer BF16) "result"
+                    body $ do
+                        value <- define F16 "value" (cast F16 (float 1.25))
+                        tile <- shared BF16 "tile" (int 32)
+                        tile
+                            ! threadIdxX
+                            .= cast BF16 (source ! threadIdxX .+ value)
+                        result ! threadIdxX .= tile ! threadIdxX
+                )
+                `shouldBe` unlines
+                    [ "#include <cuda_fp16.h>"
+                    , "#include <cuda_bf16.h>"
+                    , ""
+                    , "extern \"C\" __global__ void half_types(__half const* source, __nv_bfloat16* result) {"
+                    , "    __half value = static_cast<__half>(1.25f);"
+                    , "    __shared__ __nv_bfloat16 tile[32];"
+                    , "    (tile[threadIdx.x] = static_cast<__nv_bfloat16>((source[threadIdx.x] + value)));"
+                    , "    (result[threadIdx.x] = tile[threadIdx.x]);"
+                    , "}"
+                    ]
+
         it "renders the remaining syntax forms" $ do
             Codegen.generate
                 ( kernel "syntax" $ do

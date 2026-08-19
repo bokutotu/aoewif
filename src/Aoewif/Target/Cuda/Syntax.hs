@@ -21,6 +21,8 @@ data Type
     = Bool
     | U32
     | USize
+    | F16
+    | BF16
     | F32
     | Const Type
     | Pointer Type
