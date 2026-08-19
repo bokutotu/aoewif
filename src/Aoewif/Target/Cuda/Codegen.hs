@@ -44,6 +44,15 @@ renderStmt indentation stmt =
                 ++ renderName name
                 ++ renderInitializer initializer
                 ++ ";\n"
+        Syntax.SharedDecl elementType name extent ->
+            indent indentation
+                ++ "__shared__ "
+                ++ renderType elementType
+                ++ " "
+                ++ renderName name
+                ++ "["
+                ++ renderExpr extent
+                ++ "];\n"
         Syntax.ExprStmt expr ->
             indent indentation
                 ++ renderExpr expr

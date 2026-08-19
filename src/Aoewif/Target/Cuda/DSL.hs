@@ -26,6 +26,8 @@ module Aoewif.Target.Cuda.DSL (
     int,
     kernel,
     parameter,
+    shared,
+    syncThreads,
     threadIdxX,
     threadIdxY,
     threadIdxZ,
@@ -73,6 +75,13 @@ define variableType text initializer = do
   where
     name = Name text
 
+shared :: Type -> String -> Expr -> Block Expr
+shared elementType text extent = do
+    emit (SharedDecl elementType name extent)
+    pure (Var name)
+  where
+    name = Name text
+
 expr_ :: Expr -> Block ()
 expr_ = emit . ExprStmt
 
@@ -107,6 +116,10 @@ call = Call
 call_ :: Expr -> [Expr] -> Block ()
 call_ function arguments =
     expr_ (call function arguments)
+
+syncThreads :: Block ()
+syncThreads =
+    call_ (var "__syncthreads") []
 
 threadIdxX, threadIdxY, threadIdxZ :: Expr
 threadIdxX = ThreadIdx ThreadIdxX

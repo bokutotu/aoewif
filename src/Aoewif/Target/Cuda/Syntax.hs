@@ -80,6 +80,7 @@ data Expr
 
 data Stmt
     = VarDecl Type Name (Maybe Expr)
+    | SharedDecl Type Name Expr
     | ExprStmt Expr
     | If Expr [Stmt] (Maybe [Stmt])
     deriving stock (Eq, Show)

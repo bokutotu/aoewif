@@ -31,6 +31,26 @@ spec =
                     , "}"
                     ]
 
+        it "renders static shared memory" $ do
+            Codegen.generate
+                ( kernel "shared_stage" $ do
+                    source <- parameter (Pointer (Const F32)) "source"
+                    result <- parameter (Pointer F32) "result"
+                    body $ do
+                        tile <- shared F32 "tile" (int 256)
+                        tile ! threadIdxX .= source ! threadIdxX
+                        syncThreads
+                        result ! threadIdxX .= tile ! threadIdxX
+                )
+                `shouldBe` unlines
+                    [ "extern \"C\" __global__ void shared_stage(float const* source, float* result) {"
+                    , "    __shared__ float tile[256];"
+                    , "    (tile[threadIdx.x] = source[threadIdx.x]);"
+                    , "    __syncthreads();"
+                    , "    (result[threadIdx.x] = tile[threadIdx.x]);"
+                    , "}"
+                    ]
+
         it "renders the remaining syntax forms" $ do
             Codegen.generate
                 ( kernel "syntax" $ do
