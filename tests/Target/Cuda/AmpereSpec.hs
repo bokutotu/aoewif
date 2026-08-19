@@ -118,6 +118,30 @@ spec =
 
                            """
 
+        it "renders a cp.async K-loop" $ do
+            Codegen.generate
+                ( kernel "kloop" $ do
+                    a <- parameter (Pointer (Const F32)) "A"
+                    k <- parameter U32 "k"
+                    body $ do
+                        stage <- shared F32 "stage" (int 64)
+                        for_ (define U32 "kk" (int 0)) (.< k) (\kk -> kk .+ int 16) $ \kk -> do
+                            cpAsync CacheGlobal Bytes16 (stage ! int 0) (a ! kk)
+                            commitGroup
+                )
+                `shouldBe` """
+                           extern "C" __global__ void kloop(float const* A, uint32_t k) {
+                               __shared__ float stage[64];
+                               for (uint32_t kk = 0; (kk < k); (kk = (kk + 16))) {
+                                   asm volatile("cp.async.cg.shared.global [%0], [%1], 16;"
+                                       :: "r"(__cvta_generic_to_shared(&stage[0])), "l"(&A[kk])
+                                   );
+                                   asm volatile("cp.async.commit_group;");
+                               }
+                           }
+
+                           """
+
         it "renders a cp.async pipeline" $ do
             Codegen.generate
                 ( kernel "pipeline" $ do

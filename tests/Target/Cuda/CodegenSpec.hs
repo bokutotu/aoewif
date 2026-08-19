@@ -32,6 +32,24 @@ spec =
 
                            """
 
+        it "renders a for loop" $ do
+            Codegen.generate
+                ( kernel "loop" $ do
+                    result <- parameter (Pointer F32) "result"
+                    k <- parameter U32 "k"
+                    body $ do
+                        for_ (define U32 "kk" (int 0)) (.< k) (\kk -> kk .+ int 16) $ \kk -> do
+                            result ! kk .= float 0
+                )
+                `shouldBe` """
+                           extern "C" __global__ void loop(float* result, uint32_t k) {
+                               for (uint32_t kk = 0; (kk < k); (kk = (kk + 16))) {
+                                   (result[kk] = 0.0f);
+                               }
+                           }
+
+                           """
+
         it "renders static shared memory" $ do
             Codegen.generate
                 ( kernel "shared_stage" $ do

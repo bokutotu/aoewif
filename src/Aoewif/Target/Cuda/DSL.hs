@@ -19,6 +19,7 @@ module Aoewif.Target.Cuda.DSL (
     emit,
     expr_,
     float,
+    for_,
     gridDimX,
     gridDimY,
     gridDimZ,
@@ -101,6 +102,21 @@ ifElse_ condition consequent alternative =
             condition
             (blockStatements consequent)
             (Just (blockStatements alternative))
+        )
+
+-- Runtime for loop. The init block declares the loop variable and yields it;
+-- the condition/update/body lambdas receive it. The update lambda returns the
+-- next value and the header assignment is synthesized, so
+-- `\kk -> kk .+ int 16` renders as `(kk = (kk + 16))`.
+for_ :: Block Expr -> (Expr -> Expr) -> (Expr -> Expr) -> (Expr -> Block ()) -> Block ()
+for_ initBlock condition update loopBody = do
+    let Block (initStmts, loopVar) = initBlock
+    emit
+        ( For
+            initStmts
+            (condition loopVar)
+            (Just (Binary Assign loopVar (update loopVar)))
+            (blockStatements (loopBody loopVar))
         )
 
 var :: String -> Expr

@@ -95,6 +95,18 @@ renderStmt indentation stmt =
                 ++ ") {\n"
                 ++ renderStmts (indentation + 1) body
                 ++ renderAlternative indentation alternative
+        Syntax.For initStmts condition update body ->
+            indent indentation
+                ++ "for ("
+                ++ renderForInit initStmts
+                ++ "; "
+                ++ renderExpr condition
+                ++ "; "
+                ++ renderForUpdate update
+                ++ ") {\n"
+                ++ renderStmts (indentation + 1) body
+                ++ indent indentation
+                ++ "}\n"
         Syntax.Op op ->
             renderOp indentation op
 
@@ -112,6 +124,24 @@ renderAlternative indentation (Just body) =
         ++ renderStmts (indentation + 1) body
         ++ indent indentation
         ++ "}\n"
+
+-- The C for-header init is a single declaration or expression, never a
+-- newline-terminated statement, so these render without the trailing ";\n".
+renderForInit :: [Syntax.Stmt] -> String
+renderForInit =
+    intercalate "; " . map renderForInitStmt
+
+renderForInitStmt :: Syntax.Stmt -> String
+renderForInitStmt (Syntax.VarDecl variableType name initializer) =
+    renderType variableType ++ " " ++ renderName name ++ renderInitializer initializer
+renderForInitStmt (Syntax.ExprStmt expr) =
+    renderExpr expr
+renderForInitStmt statement =
+    renderStmt 0 statement
+
+renderForUpdate :: Maybe Syntax.Expr -> String
+renderForUpdate Nothing     = ""
+renderForUpdate (Just expr) = renderExpr expr
 
 renderExpr :: Syntax.Expr -> String
 renderExpr expr =
