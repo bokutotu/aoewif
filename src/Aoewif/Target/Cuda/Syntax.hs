@@ -14,6 +14,8 @@ module Aoewif.Target.Cuda.Syntax (
 )
 where
 
+import           Aoewif.Target.Cuda.TensorCoreOp (TensorCoreOp)
+
 newtype Name = Name String
     deriving stock (Eq, Ord, Show)
 
@@ -85,11 +87,12 @@ data Stmt
     | SharedDecl Type Name Expr
     | ExprStmt Expr
     | If Expr [Stmt] (Maybe [Stmt])
-    deriving stock (Eq, Show)
+    | Op TensorCoreOp
+    deriving stock (Show)
 
 data Kernel = Kernel
     { kernelName       :: Name
     , kernelParameters :: [Parameter]
     , kernelBody       :: [Stmt]
     }
-    deriving stock (Eq, Show)
+    deriving stock (Show)

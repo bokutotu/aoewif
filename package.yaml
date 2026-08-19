@@ -16,9 +16,14 @@ ghc-options:
 library:
   source-dirs: src
   exposed-modules:
+    - Aoewif.Target.Cuda.Ampere
+    - Aoewif.Target.Cuda.Ampere.DSL
+    - Aoewif.Target.Cuda.Ampere.Instruction
+    - Aoewif.Target.Cuda.Ampere.Render
     - Aoewif.Target.Cuda.Codegen
     - Aoewif.Target.Cuda.DSL
     - Aoewif.Target.Cuda.Syntax
+    - Aoewif.Target.Cuda.TensorCoreOp
 
 tests:
   aoewif-test:

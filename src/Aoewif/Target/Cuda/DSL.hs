@@ -16,6 +16,7 @@ module Aoewif.Target.Cuda.DSL (
     cast,
     declare,
     define,
+    emit,
     expr_,
     float,
     gridDimX,

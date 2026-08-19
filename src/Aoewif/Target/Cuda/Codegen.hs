@@ -3,11 +3,14 @@ module Aoewif.Target.Cuda.Codegen (
     Include (..),
     generate,
     generateWith,
+    indent,
+    renderExpr,
 )
 where
 
-import qualified Aoewif.Target.Cuda.Syntax as Syntax
-import           Data.List                 (intercalate)
+import qualified Aoewif.Target.Cuda.Syntax       as Syntax
+import           Aoewif.Target.Cuda.TensorCoreOp (RenderOp (renderOp))
+import           Data.List                       (intercalate)
 
 data Include
     = CudaFp16Header
@@ -92,6 +95,8 @@ renderStmt indentation stmt =
                 ++ ") {\n"
                 ++ renderStmts (indentation + 1) body
                 ++ renderAlternative indentation alternative
+        Syntax.Op op ->
+            renderOp indentation op
 
 renderInitializer :: Maybe Syntax.Expr -> String
 renderInitializer Nothing = ""
