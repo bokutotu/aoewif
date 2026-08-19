@@ -29,6 +29,8 @@ tests:
   aoewif-test:
     main: Spec.hs
     source-dirs: tests
+    default-extensions:
+      - MultilineStrings
     dependencies:
       - aoewif
       - hspec

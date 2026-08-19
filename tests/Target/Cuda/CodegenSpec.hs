@@ -22,14 +22,15 @@ spec =
                         if_ (index .< size) $
                             result ! index .= result ! index .+ source ! index
                 )
-                `shouldBe` unlines
-                    [ "extern \"C\" __global__ void add(float const* source, float* result, size_t size) {"
-                    , "    size_t index = ((static_cast<size_t>(blockIdx.x) * static_cast<size_t>(blockDim.x)) + static_cast<size_t>(threadIdx.x));"
-                    , "    if ((index < size)) {"
-                    , "        (result[index] = (result[index] + source[index]));"
-                    , "    }"
-                    , "}"
-                    ]
+                `shouldBe` """
+                           extern "C" __global__ void add(float const* source, float* result, size_t size) {
+                               size_t index = ((static_cast<size_t>(blockIdx.x) * static_cast<size_t>(blockDim.x)) + static_cast<size_t>(threadIdx.x));
+                               if ((index < size)) {
+                                   (result[index] = (result[index] + source[index]));
+                               }
+                           }
+
+                           """
 
         it "renders static shared memory" $ do
             Codegen.generate
@@ -42,14 +43,15 @@ spec =
                         syncThreads
                         result ! threadIdxX .= tile ! threadIdxX
                 )
-                `shouldBe` unlines
-                    [ "extern \"C\" __global__ void shared_stage(float const* source, float* result) {"
-                    , "    __shared__ float tile[256];"
-                    , "    (tile[threadIdx.x] = source[threadIdx.x]);"
-                    , "    __syncthreads();"
-                    , "    (result[threadIdx.x] = tile[threadIdx.x]);"
-                    , "}"
-                    ]
+                `shouldBe` """
+                           extern "C" __global__ void shared_stage(float const* source, float* result) {
+                               __shared__ float tile[256];
+                               (tile[threadIdx.x] = source[threadIdx.x]);
+                               __syncthreads();
+                               (result[threadIdx.x] = tile[threadIdx.x]);
+                           }
+
+                           """
 
         it "renders configured half-precision types and headers" $ do
             Codegen.generateWith
@@ -69,17 +71,18 @@ spec =
                             .= cast BF16 (source ! threadIdxX .+ value)
                         result ! threadIdxX .= tile ! threadIdxX
                 )
-                `shouldBe` unlines
-                    [ "#include <cuda_fp16.h>"
-                    , "#include <cuda_bf16.h>"
-                    , ""
-                    , "extern \"C\" __global__ void half_types(__half const* source, __nv_bfloat16* result) {"
-                    , "    __half value = static_cast<__half>(1.25f);"
-                    , "    __shared__ __nv_bfloat16 tile[32];"
-                    , "    (tile[threadIdx.x] = static_cast<__nv_bfloat16>((source[threadIdx.x] + value)));"
-                    , "    (result[threadIdx.x] = tile[threadIdx.x]);"
-                    , "}"
-                    ]
+                `shouldBe` """
+                           #include <cuda_fp16.h>
+                           #include <cuda_bf16.h>
+
+                           extern "C" __global__ void half_types(__half const* source, __nv_bfloat16* result) {
+                               __half value = static_cast<__half>(1.25f);
+                               __shared__ __nv_bfloat16 tile[32];
+                               (tile[threadIdx.x] = static_cast<__nv_bfloat16>((source[threadIdx.x] + value)));
+                               (result[threadIdx.x] = tile[threadIdx.x]);
+                           }
+
+                           """
 
         it "renders the remaining syntax forms" $ do
             Codegen.generate
@@ -105,22 +108,23 @@ spec =
                             )
                             (expr_ (int (-1)))
                 )
-                `shouldBe` unlines
-                    [ "extern \"C\" __global__ void syntax(bool condition, uint32_t count, float* const pointer) {"
-                    , "    float value;"
-                    , "    function(1.25f, 2);"
-                    , "    if (condition) {"
-                    , "        threadIdx.y;"
-                    , "        threadIdx.z;"
-                    , "        blockIdx.y;"
-                    , "        blockIdx.z;"
-                    , "        blockDim.y;"
-                    , "        blockDim.z;"
-                    , "        gridDim.x;"
-                    , "        gridDim.y;"
-                    , "        gridDim.z;"
-                    , "    } else {"
-                    , "        -1;"
-                    , "    }"
-                    , "}"
-                    ]
+                `shouldBe` """
+                           extern "C" __global__ void syntax(bool condition, uint32_t count, float* const pointer) {
+                               float value;
+                               function(1.25f, 2);
+                               if (condition) {
+                                   threadIdx.y;
+                                   threadIdx.z;
+                                   blockIdx.y;
+                                   blockIdx.z;
+                                   blockDim.y;
+                                   blockDim.z;
+                                   gridDim.x;
+                                   gridDim.y;
+                                   gridDim.z;
+                               } else {
+                                   -1;
+                               }
+                           }
+
+                           """
