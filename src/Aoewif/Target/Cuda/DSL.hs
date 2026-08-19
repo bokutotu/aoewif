@@ -5,6 +5,7 @@ module Aoewif.Target.Cuda.DSL (
     KernelBuilder,
     Type (..),
     body,
+    bitcast,
     blockDimX,
     blockDimY,
     blockDimZ,
@@ -30,7 +31,6 @@ module Aoewif.Target.Cuda.DSL (
     parameter,
     shared,
     syncThreads,
-    swizzle,
     threadIdxX,
     threadIdxY,
     threadIdxZ,
@@ -38,6 +38,8 @@ module Aoewif.Target.Cuda.DSL (
     (!),
     (.*),
     (.+),
+    (.-),
+    (.%),
     (.=),
     (.<),
     (.>>),
@@ -131,9 +133,10 @@ float = FloatLit
 cast :: Type -> Expr -> Expr
 cast targetType = Unary (StaticCast targetType)
 
-swizzle :: Int -> Int -> Expr -> Expr
-swizzle shift mask index =
-    index .^ ((index .>> int (fromIntegral shift)) .& int (fromIntegral mask))
+-- Reinterpret the bits of a register as another type, e.g. an f32
+-- accumulator held in a u32 register: `*reinterpret_cast<float*>(&c0)`.
+bitcast :: Type -> Expr -> Expr
+bitcast targetType = Unary (ReinterpretCast targetType)
 
 call :: Expr -> [Expr] -> Expr
 call = Call
@@ -176,10 +179,20 @@ infixl 7 .*
 (.*) :: Expr -> Expr -> Expr
 (.*) = Binary Multiply
 
+infixl 7 .%
+
+(.%) :: Expr -> Expr -> Expr
+(.%) = Binary Modulo
+
 infixl 6 .+
 
 (.+) :: Expr -> Expr -> Expr
 (.+) = Binary Add
+
+infixl 6 .-
+
+(.-) :: Expr -> Expr -> Expr
+(.-) = Binary Subtract
 
 infix 4 .<
 

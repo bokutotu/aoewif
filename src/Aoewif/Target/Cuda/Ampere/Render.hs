@@ -25,8 +25,8 @@ instance RenderOp AmpereOp where
                 renderMma indentation shape aRegisters bRegisters dRegisters
             LdMatrix form registers address ->
                 renderLdMatrix indentation form registers address
-            CpAsync cache size destination source ->
-                renderCpAsync indentation cache size destination source
+            CpAsync cache size sourceSize destination source ->
+                renderCpAsync indentation cache size sourceSize destination source
             CommitGroup ->
                 asmLine indentation "cp.async.commit_group;"
             WaitGroup groups ->
@@ -41,9 +41,9 @@ data MmaInfo = MmaInfo
 
 mmaInfo :: MmaShape -> MmaInfo
 mmaInfo M16N8K8F16 =
-    MmaInfo "m16n8k8.row.col.f32.f16.f16.f32" 4 2 4
-mmaInfo M16N8K16Tf32 =
-    MmaInfo "m16n8k16.row.col.f32.tf32.tf32.f32" 4 2 4
+    MmaInfo "m16n8k8.row.col.f32.f16.f16.f32" 2 1 4
+mmaInfo M16N8K8Tf32 =
+    MmaInfo "m16n8k8.row.col.f32.tf32.tf32.f32" 4 2 4
 mmaInfo M16N8K16Bf16 =
     MmaInfo "m16n8k16.row.col.f32.bf16.bf16.f32" 4 2 4
 mmaInfo M8N8K4F64 =
@@ -99,25 +99,30 @@ renderLdMatrix indentation form registers address =
   where
     (formTag, registerCount) = ldMatrixInfo form
 
-renderCpAsync :: Int -> CacheOp -> CpAsyncSize -> Expr -> Expr -> String
-renderCpAsync indentation cache size destination source =
+-- With a source byte count, fewer than cp-size bytes are copied and the rest
+-- of the destination is zero-filled; only the .ca variant exists in PTX.
+renderCpAsync :: Int -> CacheOp -> CpAsyncSize -> Maybe Expr -> Expr -> Expr -> String
+renderCpAsync indentation cache size sourceSize destination source =
     unlines
-        [ asmOpen
-            indentation
-            ( "cp.async."
-                ++ cacheTag cache
-                ++ ".shared.global [%0], [%1], "
-                ++ show (bytes size)
-                ++ ";"
-            )
-        , indent (indentation + 1)
-            ++ ":: \"r\"("
-            ++ sharedAddress destination
-            ++ "), \"l\"(&"
-            ++ renderExpr source
-            ++ ")"
+        [ asmOpen indentation instruction
+        , indent (indentation + 1) ++ ":: " ++ intercalate ", " operands
         , indent indentation ++ ");"
         ]
+  where
+    instruction =
+        "cp.async."
+            ++ cacheTag cache
+            ++ ".shared.global [%0], [%1], "
+            ++ show (bytes size)
+            ++ maybe ";" (const ", %2;") sourceSize
+    operands =
+        [ "\"r\"(" ++ sharedAddress destination ++ ")"
+        , "\"l\"(&" ++ renderExpr source ++ ")"
+        ]
+            ++ maybe
+                []
+                (\sourceSizeExpr -> ["\"r\"(" ++ renderExpr sourceSizeExpr ++ ")"])
+                sourceSize
 
 asmOpen :: Int -> String -> String
 asmOpen indentation instruction =

@@ -57,14 +57,17 @@ data GridDim
     | GridDimZ
     deriving stock (Eq, Show)
 
-newtype UnaryOp
+data UnaryOp
     = StaticCast Type
+    | ReinterpretCast Type
     deriving stock (Eq, Show)
 
 data BinaryOp
     = Assign
     | Add
+    | Subtract
     | Multiply
+    | Modulo
     | LessThan
     | ShiftRight
     | BitAnd

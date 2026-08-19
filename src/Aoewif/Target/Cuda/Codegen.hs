@@ -166,6 +166,12 @@ renderExpr expr =
                 ++ ">("
                 ++ renderExpr operand
                 ++ ")"
+        Syntax.Unary (Syntax.ReinterpretCast targetType) operand ->
+            "*reinterpret_cast<"
+                ++ renderType targetType
+                ++ "*>(&"
+                ++ renderExpr operand
+                ++ ")"
         Syntax.Binary operator lhs rhs ->
             "("
                 ++ renderExpr lhs
@@ -188,7 +194,9 @@ renderExpr expr =
 renderBinaryOp :: Syntax.BinaryOp -> String
 renderBinaryOp Syntax.Assign     = "="
 renderBinaryOp Syntax.Add        = "+"
+renderBinaryOp Syntax.Subtract   = "-"
 renderBinaryOp Syntax.Multiply   = "*"
+renderBinaryOp Syntax.Modulo     = "%"
 renderBinaryOp Syntax.LessThan   = "<"
 renderBinaryOp Syntax.ShiftRight = ">>"
 renderBinaryOp Syntax.BitAnd     = "&"

@@ -50,9 +50,13 @@ mma shape (Fragment aRegisters) (Fragment bRegisters) (Fragment dRegisters) =
             )
         )
 
-cpAsync :: CacheOp -> CpAsyncSize -> Expr -> Expr -> Block ()
-cpAsync cache size destination source =
-    emit (Op (TensorCoreOp (CpAsync cache size destination source)))
+-- With Just sourceSize, fewer than cp-size bytes are copied from the source
+-- and the rest of the 16B-aligned destination is zero-filled, so a partial
+-- k-tile can be loaded without reading out of bounds; only the .ca variant
+-- exists in PTX.
+cpAsync :: CacheOp -> CpAsyncSize -> Maybe Expr -> Expr -> Expr -> Block ()
+cpAsync cache size sourceSize destination source =
+    emit (Op (TensorCoreOp (CpAsync cache size sourceSize destination source)))
 
 commitGroup :: Block ()
 commitGroup =

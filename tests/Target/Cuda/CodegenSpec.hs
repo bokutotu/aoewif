@@ -75,7 +75,11 @@ spec =
             Codegen.generate
                 ( kernel "swizzled" $ body $ do
                     tile <- shared F32 "tile" (int 128)
-                    tile ! swizzle 3 7 (threadIdxX .+ int 16) .= int 0
+                    tile
+                        ! ( (threadIdxX .+ int 16)
+                                .^ (((threadIdxX .+ int 16) .>> int 3) .& int 7)
+                          )
+                        .= int 0
                 )
                 `shouldBe` """
                            extern "C" __global__ void swizzled() {
@@ -157,6 +161,38 @@ spec =
                                } else {
                                    -1;
                                }
+                           }
+
+                           """
+
+        it "renders subtraction, modulo, bitcast, and a 128B swizzle expression" $ do
+            -- The 128B swizzle for f16 elements stored in 16B rows: permutes
+            -- the 16B granules of each 128B group while keeping the element
+            -- offset within a granule, so cp.async/ldmatrix addresses stay 16B
+            -- aligned. Composed from the raw operators, not a DSL primitive.
+            let swizzled index =
+                    ((index .>> int 3) .^ ((index .>> int 6) .& int 7)) .* int 8 .+ (index .& int 7)
+            Codegen.generate
+                ( kernel "ops" $ do
+                    index <- parameter U32 "index"
+                    value <- parameter U32 "value"
+                    result <- parameter (Pointer F32) "result"
+                    body $ do
+                        tile <- shared F16 "tile" (int 128)
+                        expr_ (index .- int 16)
+                        expr_ (index .% int 4)
+                        expr_ (swizzled (threadIdxX .+ index))
+                        tile ! swizzled index .= cast F16 (float 1)
+                        result ! index .= bitcast F32 value
+                )
+                `shouldBe` """
+                           extern "C" __global__ void ops(uint32_t index, uint32_t value, float* result) {
+                               __shared__ __half tile[128];
+                               (index - 16);
+                               (index % 4);
+                               (((((threadIdx.x + index) >> 3) ^ (((threadIdx.x + index) >> 6) & 7)) * 8) + ((threadIdx.x + index) & 7));
+                               (tile[((((index >> 3) ^ ((index >> 6) & 7)) * 8) + (index & 7))] = static_cast<__half>(1.0f));
+                               (result[index] = *reinterpret_cast<float*>(&value));
                            }
 
                            """
