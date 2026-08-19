@@ -16,6 +16,7 @@ ghc-options:
 library:
   source-dirs: src
   exposed-modules:
+    - Aoewif.Target.Cuda.Codegen
     - Aoewif.Target.Cuda.Syntax
 
 tests:
