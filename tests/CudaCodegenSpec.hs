@@ -19,7 +19,7 @@ spec =
                         (Syntax.Name "result")
                     , Syntax.Parameter Syntax.USize (Syntax.Name "size")
                     ]
-                    [ Syntax.VariableDeclaration
+                    [ Syntax.VarDecl
                         Syntax.USize
                         (Syntax.Name "index")
                         ( Just
@@ -45,25 +45,25 @@ spec =
                     , Syntax.If
                         ( Syntax.Binary
                             Syntax.LessThan
-                            (Syntax.Variable (Syntax.Name "index"))
-                            (Syntax.Variable (Syntax.Name "size"))
+                            (Syntax.Var (Syntax.Name "index"))
+                            (Syntax.Var (Syntax.Name "size"))
                         )
-                        [ Syntax.ExpressionStatement
+                        [ Syntax.ExprStmt
                             ( Syntax.Binary
                                 Syntax.Assign
                                 ( Syntax.Subscript
-                                    (Syntax.Variable (Syntax.Name "result"))
-                                    (Syntax.Variable (Syntax.Name "index"))
+                                    (Syntax.Var (Syntax.Name "result"))
+                                    (Syntax.Var (Syntax.Name "index"))
                                 )
                                 ( Syntax.Binary
                                     Syntax.Add
                                     ( Syntax.Subscript
-                                        (Syntax.Variable (Syntax.Name "result"))
-                                        (Syntax.Variable (Syntax.Name "index"))
+                                        (Syntax.Var (Syntax.Name "result"))
+                                        (Syntax.Var (Syntax.Name "index"))
                                     )
                                     ( Syntax.Subscript
-                                        (Syntax.Variable (Syntax.Name "source"))
-                                        (Syntax.Variable (Syntax.Name "index"))
+                                        (Syntax.Var (Syntax.Name "source"))
+                                        (Syntax.Var (Syntax.Name "index"))
                                     )
                                 )
                             )
@@ -90,27 +90,27 @@ spec =
                         (Syntax.Const (Syntax.Pointer Syntax.F32))
                         (Syntax.Name "pointer")
                     ]
-                    [ Syntax.VariableDeclaration Syntax.F32 (Syntax.Name "value") Nothing
-                    , Syntax.ExpressionStatement
+                    [ Syntax.VarDecl Syntax.F32 (Syntax.Name "value") Nothing
+                    , Syntax.ExprStmt
                         ( Syntax.Call
-                            (Syntax.Variable (Syntax.Name "function"))
-                            [ Syntax.FloatLiteral 1.25
-                            , Syntax.IntegerLiteral 2
+                            (Syntax.Var (Syntax.Name "function"))
+                            [ Syntax.FloatLit 1.25
+                            , Syntax.IntLit 2
                             ]
                         )
                     , Syntax.If
-                        (Syntax.Variable (Syntax.Name "condition"))
-                        [ Syntax.ExpressionStatement (Syntax.ThreadIdx Syntax.ThreadIdxY)
-                        , Syntax.ExpressionStatement (Syntax.ThreadIdx Syntax.ThreadIdxZ)
-                        , Syntax.ExpressionStatement (Syntax.BlockIdx Syntax.BlockIdxY)
-                        , Syntax.ExpressionStatement (Syntax.BlockIdx Syntax.BlockIdxZ)
-                        , Syntax.ExpressionStatement (Syntax.BlockDim Syntax.BlockDimY)
-                        , Syntax.ExpressionStatement (Syntax.BlockDim Syntax.BlockDimZ)
-                        , Syntax.ExpressionStatement (Syntax.GridDim Syntax.GridDimX)
-                        , Syntax.ExpressionStatement (Syntax.GridDim Syntax.GridDimY)
-                        , Syntax.ExpressionStatement (Syntax.GridDim Syntax.GridDimZ)
+                        (Syntax.Var (Syntax.Name "condition"))
+                        [ Syntax.ExprStmt (Syntax.ThreadIdx Syntax.ThreadIdxY)
+                        , Syntax.ExprStmt (Syntax.ThreadIdx Syntax.ThreadIdxZ)
+                        , Syntax.ExprStmt (Syntax.BlockIdx Syntax.BlockIdxY)
+                        , Syntax.ExprStmt (Syntax.BlockIdx Syntax.BlockIdxZ)
+                        , Syntax.ExprStmt (Syntax.BlockDim Syntax.BlockDimY)
+                        , Syntax.ExprStmt (Syntax.BlockDim Syntax.BlockDimZ)
+                        , Syntax.ExprStmt (Syntax.GridDim Syntax.GridDimX)
+                        , Syntax.ExprStmt (Syntax.GridDim Syntax.GridDimY)
+                        , Syntax.ExprStmt (Syntax.GridDim Syntax.GridDimZ)
                         ]
-                        (Just [Syntax.ExpressionStatement (Syntax.IntegerLiteral (-1))])
+                        (Just [Syntax.ExprStmt (Syntax.IntLit (-1))])
                     ]
                 )
                 `shouldBe` unlines

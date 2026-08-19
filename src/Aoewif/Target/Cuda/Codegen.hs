@@ -13,7 +13,7 @@ generate (Syntax.Kernel name parameters body) =
         ++ "("
         ++ intercalate ", " (map renderParameter parameters)
         ++ ") {\n"
-        ++ renderStatements 1 body
+        ++ renderStmts 1 body
         ++ "}\n"
 
 renderParameter :: Syntax.Parameter -> String
@@ -30,56 +30,56 @@ renderType (Syntax.Const valueType) =
 renderType (Syntax.Pointer pointeeType) =
     renderType pointeeType ++ "*"
 
-renderStatements :: Int -> [Syntax.Statement] -> String
-renderStatements indentation =
-    concatMap (renderStatement indentation)
+renderStmts :: Int -> [Syntax.Stmt] -> String
+renderStmts indentation =
+    concatMap (renderStmt indentation)
 
-renderStatement :: Int -> Syntax.Statement -> String
-renderStatement indentation statement =
-    case statement of
-        Syntax.VariableDeclaration variableType name initializer ->
+renderStmt :: Int -> Syntax.Stmt -> String
+renderStmt indentation stmt =
+    case stmt of
+        Syntax.VarDecl variableType name initializer ->
             indent indentation
                 ++ renderType variableType
                 ++ " "
                 ++ renderName name
                 ++ renderInitializer initializer
                 ++ ";\n"
-        Syntax.ExpressionStatement expression ->
+        Syntax.ExprStmt expr ->
             indent indentation
-                ++ renderExpression expression
+                ++ renderExpr expr
                 ++ ";\n"
         Syntax.If condition body alternative ->
             indent indentation
                 ++ "if ("
-                ++ renderExpression condition
+                ++ renderExpr condition
                 ++ ") {\n"
-                ++ renderStatements (indentation + 1) body
+                ++ renderStmts (indentation + 1) body
                 ++ renderAlternative indentation alternative
 
-renderInitializer :: Maybe Syntax.Expression -> String
+renderInitializer :: Maybe Syntax.Expr -> String
 renderInitializer Nothing = ""
-renderInitializer (Just expression) =
-    " = " ++ renderExpression expression
+renderInitializer (Just expr) =
+    " = " ++ renderExpr expr
 
-renderAlternative :: Int -> Maybe [Syntax.Statement] -> String
+renderAlternative :: Int -> Maybe [Syntax.Stmt] -> String
 renderAlternative indentation Nothing =
     indent indentation ++ "}\n"
 renderAlternative indentation (Just body) =
     indent indentation
         ++ "} else {\n"
-        ++ renderStatements (indentation + 1) body
+        ++ renderStmts (indentation + 1) body
         ++ indent indentation
         ++ "}\n"
 
-renderExpression :: Syntax.Expression -> String
-renderExpression expression =
-    case expression of
-        Syntax.Variable name ->
+renderExpr :: Syntax.Expr -> String
+renderExpr expr =
+    case expr of
+        Syntax.Var name ->
             renderName name
-        Syntax.IntegerLiteral value ->
+        Syntax.IntLit value ->
             show value
-        Syntax.FloatLiteral value ->
-            renderFloatLiteral value
+        Syntax.FloatLit value ->
+            renderFloatLit value
         Syntax.ThreadIdx index ->
             renderThreadIdx index
         Syntax.BlockIdx index ->
@@ -92,25 +92,25 @@ renderExpression expression =
             "static_cast<"
                 ++ renderType targetType
                 ++ ">("
-                ++ renderExpression operand
+                ++ renderExpr operand
                 ++ ")"
         Syntax.Binary operator lhs rhs ->
             "("
-                ++ renderExpression lhs
+                ++ renderExpr lhs
                 ++ " "
                 ++ renderBinaryOp operator
                 ++ " "
-                ++ renderExpression rhs
+                ++ renderExpr rhs
                 ++ ")"
         Syntax.Subscript value index ->
-            renderExpression value
+            renderExpr value
                 ++ "["
-                ++ renderExpression index
+                ++ renderExpr index
                 ++ "]"
         Syntax.Call function arguments ->
-            renderExpression function
+            renderExpr function
                 ++ "("
-                ++ intercalate ", " (map renderExpression arguments)
+                ++ intercalate ", " (map renderExpr arguments)
                 ++ ")"
 
 renderBinaryOp :: Syntax.BinaryOp -> String
@@ -119,8 +119,8 @@ renderBinaryOp Syntax.Add      = "+"
 renderBinaryOp Syntax.Multiply = "*"
 renderBinaryOp Syntax.LessThan = "<"
 
-renderFloatLiteral :: Float -> String
-renderFloatLiteral value
+renderFloatLit :: Float -> String
+renderFloatLit value
     | isNaN value = "NAN"
     | isInfinite value && value > 0 = "INFINITY"
     | isInfinite value = "-INFINITY"

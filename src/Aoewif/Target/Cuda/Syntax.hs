@@ -2,12 +2,12 @@ module Aoewif.Target.Cuda.Syntax (
     BinaryOp (..),
     BlockDim (..),
     BlockIdx (..),
-    Expression (..),
+    Expr (..),
     GridDim (..),
     Kernel (..),
     Name (..),
     Parameter (..),
-    Statement (..),
+    Stmt (..),
     ThreadIdx (..),
     Type (..),
     UnaryOp (..),
@@ -64,29 +64,29 @@ data BinaryOp
     | LessThan
     deriving stock (Eq, Show)
 
-data Expression
-    = Variable Name
-    | IntegerLiteral Integer
-    | FloatLiteral Float
+data Expr
+    = Var Name
+    | IntLit Integer
+    | FloatLit Float
     | ThreadIdx ThreadIdx
     | BlockIdx BlockIdx
     | BlockDim BlockDim
     | GridDim GridDim
-    | Unary UnaryOp Expression
-    | Binary BinaryOp Expression Expression
-    | Subscript Expression Expression
-    | Call Expression [Expression]
+    | Unary UnaryOp Expr
+    | Binary BinaryOp Expr Expr
+    | Subscript Expr Expr
+    | Call Expr [Expr]
     deriving stock (Eq, Show)
 
-data Statement
-    = VariableDeclaration Type Name (Maybe Expression)
-    | ExpressionStatement Expression
-    | If Expression [Statement] (Maybe [Statement])
+data Stmt
+    = VarDecl Type Name (Maybe Expr)
+    | ExprStmt Expr
+    | If Expr [Stmt] (Maybe [Stmt])
     deriving stock (Eq, Show)
 
 data Kernel = Kernel
     { kernelName       :: Name
     , kernelParameters :: [Parameter]
-    , kernelBody       :: [Statement]
+    , kernelBody       :: [Stmt]
     }
     deriving stock (Eq, Show)
