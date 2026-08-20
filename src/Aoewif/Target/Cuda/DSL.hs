@@ -106,10 +106,6 @@ ifElse_ condition consequent alternative =
             (Just (blockStatements alternative))
         )
 
--- Runtime for loop. The init block declares the loop variable and yields it;
--- the condition/update/body lambdas receive it. The update lambda returns the
--- next value and the header assignment is synthesized, so
--- `\kk -> kk .+ int 16` renders as `(kk = (kk + 16))`.
 for_ :: Block Expr -> (Expr -> Expr) -> (Expr -> Expr) -> (Expr -> Block ()) -> Block ()
 for_ initBlock condition update loopBody = do
     let Block (initStmts, loopVar) = initBlock
@@ -133,8 +129,6 @@ float = FloatLit
 cast :: Type -> Expr -> Expr
 cast targetType = Unary (StaticCast targetType)
 
--- Reinterpret the bits of a register as another type, e.g. an f32
--- accumulator held in a u32 register: `*reinterpret_cast<float*>(&c0)`.
 bitcast :: Type -> Expr -> Expr
 bitcast targetType = Unary (ReinterpretCast targetType)
 

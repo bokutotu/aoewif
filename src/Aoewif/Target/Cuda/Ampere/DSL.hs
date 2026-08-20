@@ -4,6 +4,7 @@ module Aoewif.Target.Cuda.Ampere.DSL (
     declareFragment,
     ldMatrix,
     mma,
+    movMatrix,
     waitGroup,
     zeroFragment,
 ) where
@@ -11,8 +12,10 @@ module Aoewif.Target.Cuda.Ampere.DSL (
 import           Aoewif.Target.Cuda.Ampere.Instruction (AmpereOp (..), CacheOp,
                                                         CpAsyncSize,
                                                         Fragment (..),
-                                                        LdMatrixForm, MmaShape)
-import           Aoewif.Target.Cuda.Ampere.Render      (ldMatrixInfo)
+                                                        LdMatrixForm,
+                                                        LdMatrixMode, MmaShape,
+                                                        ldMatrixRegisterCount)
+import           Aoewif.Target.Cuda.Ampere.Render      ()
 import           Aoewif.Target.Cuda.DSL                (Block, Type (U32),
                                                         declare, emit, int,
                                                         (.=))
@@ -30,11 +33,17 @@ zeroFragment :: Fragment -> Block ()
 zeroFragment =
     mapM_ (.= int 0) . fragmentRegisters
 
-ldMatrix :: String -> LdMatrixForm -> Expr -> Block Fragment
-ldMatrix prefix form address = do
-    fragment <- declareFragment prefix (snd (ldMatrixInfo form))
-    emit (Op (TensorCoreOp (LdMatrix form (fragmentRegisters fragment) address)))
+ldMatrix :: String -> LdMatrixForm -> LdMatrixMode -> Expr -> Block Fragment
+ldMatrix prefix form mode address = do
+    fragment <- declareFragment prefix (ldMatrixRegisterCount form)
+    emit (Op (TensorCoreOp (LdMatrix mode form (fragmentRegisters fragment) address)))
     pure fragment
+
+movMatrix :: Fragment -> Block ()
+movMatrix (Fragment registers) =
+    mapM_
+        (emit . Op . TensorCoreOp . MovMatrix)
+        registers
 
 mma :: MmaShape -> Fragment -> Fragment -> Fragment -> Block ()
 mma shape (Fragment aRegisters) (Fragment bRegisters) (Fragment dRegisters) =
@@ -50,10 +59,6 @@ mma shape (Fragment aRegisters) (Fragment bRegisters) (Fragment dRegisters) =
             )
         )
 
--- With Just sourceSize, fewer than cp-size bytes are copied from the source
--- and the rest of the 16B-aligned destination is zero-filled, so a partial
--- k-tile can be loaded without reading out of bounds; only the .ca variant
--- exists in PTX.
 cpAsync :: CacheOp -> CpAsyncSize -> Maybe Expr -> Expr -> Expr -> Block ()
 cpAsync cache size sourceSize destination source =
     emit (Op (TensorCoreOp (CpAsync cache size sourceSize destination source)))

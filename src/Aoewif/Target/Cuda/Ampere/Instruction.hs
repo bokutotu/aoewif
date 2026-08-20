@@ -4,14 +4,12 @@ module Aoewif.Target.Cuda.Ampere.Instruction (
     CpAsyncSize (..),
     Fragment (..),
     LdMatrixForm (..),
+    LdMatrixMode (..),
     MmaShape (..),
+    ldMatrixRegisterCount,
 ) where
 
 import           Aoewif.Target.Cuda.Syntax (Expr)
-
--- One sm_80+ instruction family. The constructors carry their operands as
--- rendered C++ expressions; register counts are implied by the shape, never
--- checked.
 
 data MmaShape
     = M16N8K8F16
@@ -24,6 +22,11 @@ data LdMatrixForm
     = LdX1
     | LdX2
     | LdX4
+    deriving stock (Eq, Show)
+
+data LdMatrixMode
+    = LdMatrixNormal
+    | LdMatrixTranspose
     deriving stock (Eq, Show)
 
 data CacheOp
@@ -39,16 +42,18 @@ data CpAsyncSize
 
 data AmpereOp
     = Mma MmaShape [Expr] [Expr] [Expr]
-    | LdMatrix LdMatrixForm [Expr] Expr
-    | -- cache, size, optional source byte count (zfill), destination, source
-      CpAsync CacheOp CpAsyncSize (Maybe Expr) Expr Expr
+    | LdMatrix LdMatrixMode LdMatrixForm [Expr] Expr
+    | MovMatrix Expr
+    | CpAsync CacheOp CpAsyncSize (Maybe Expr) Expr Expr
     | CommitGroup
     | WaitGroup (Maybe Int)
     deriving stock (Show)
 
--- Fragments are bundles of U32 registers; all-zero bits is +0.0 for every mma
--- accumulator type.
-
 newtype Fragment = Fragment
     { fragmentRegisters :: [Expr]
     }
+
+ldMatrixRegisterCount :: LdMatrixForm -> Int
+ldMatrixRegisterCount LdX1 = 1
+ldMatrixRegisterCount LdX2 = 2
+ldMatrixRegisterCount LdX4 = 4

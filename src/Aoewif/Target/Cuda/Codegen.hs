@@ -125,8 +125,6 @@ renderAlternative indentation (Just body) =
         ++ indent indentation
         ++ "}\n"
 
--- The C for-header init is a single declaration or expression, never a
--- newline-terminated statement, so these render without the trailing ";\n".
 renderForInit :: [Syntax.Stmt] -> String
 renderForInit =
     intercalate "; " . map renderForInitStmt

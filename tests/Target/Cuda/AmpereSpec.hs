@@ -58,8 +58,8 @@ spec =
                             commitGroup
                             waitGroup (Just 1)
                             syncThreads
-                            aFragment <- ldMatrix "a" LdX4 (smemA ! swz (threadIdxX .+ int 16))
-                            bFragment <- ldMatrix "b" LdX2 (smemB ! swz (threadIdxX .+ int 8))
+                            aFragment <- ldMatrix "a" LdX4 LdMatrixNormal (smemA ! swz (threadIdxX .+ int 16))
+                            bFragment <- ldMatrix "b" LdX2 LdMatrixTranspose (smemB ! swz (threadIdxX .+ int 8))
                             mma
                                 M16N8K8F16
                                 (Fragment (take 2 (fragmentRegisters aFragment)))
@@ -101,7 +101,7 @@ spec =
                                    );
                                    uint32_t b0;
                                    uint32_t b1;
-                                   asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0,%1}, [%2];"
+                                   asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0,%1}, [%2];"
                                        : "=r"(b0), "=r"(b1)
                                        : "r"(__cvta_generic_to_shared(&smemB[((threadIdx.x + 8) ^ (((threadIdx.x + 8) >> 3) & 7))]))
                                    );
@@ -189,6 +189,7 @@ spec =
                                         ldMatrix
                                             ("a" ++ show r16)
                                             LdX4
+                                            LdMatrixNormal
                                             ( smemA
                                                 ! ( stage
                                                         .* int 1024
@@ -208,6 +209,7 @@ spec =
                                         ldMatrix
                                             ("b" ++ show c8)
                                             LdX2
+                                            LdMatrixTranspose
                                             ( smemB
                                                 ! ( stage
                                                         .* int 1024
@@ -384,25 +386,25 @@ spec =
                                    );
                                    uint32_t b00;
                                    uint32_t b01;
-                                   asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0,%1}, [%2];"
+                                   asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0,%1}, [%2];"
                                        : "=r"(b00), "=r"(b01)
                                        : "r"(__cvta_generic_to_shared(&smemB[((((kk >> 4) & 1) * 1024) + (((((((threadIdx.y & 1) * 4) + 0) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) ^ (((((((threadIdx.y & 1) * 4) + 0) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) >> 3) & 7)) * 8))]))
                                    );
                                    uint32_t b10;
                                    uint32_t b11;
-                                   asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0,%1}, [%2];"
+                                   asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0,%1}, [%2];"
                                        : "=r"(b10), "=r"(b11)
                                        : "r"(__cvta_generic_to_shared(&smemB[((((kk >> 4) & 1) * 1024) + (((((((threadIdx.y & 1) * 4) + 1) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) ^ (((((((threadIdx.y & 1) * 4) + 1) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) >> 3) & 7)) * 8))]))
                                    );
                                    uint32_t b20;
                                    uint32_t b21;
-                                   asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0,%1}, [%2];"
+                                   asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0,%1}, [%2];"
                                        : "=r"(b20), "=r"(b21)
                                        : "r"(__cvta_generic_to_shared(&smemB[((((kk >> 4) & 1) * 1024) + (((((((threadIdx.y & 1) * 4) + 2) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) ^ (((((((threadIdx.y & 1) * 4) + 2) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) >> 3) & 7)) * 8))]))
                                    );
                                    uint32_t b30;
                                    uint32_t b31;
-                                   asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0,%1}, [%2];"
+                                   asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0,%1}, [%2];"
                                        : "=r"(b30), "=r"(b31)
                                        : "r"(__cvta_generic_to_shared(&smemB[((((kk >> 4) & 1) * 1024) + (((((((threadIdx.y & 1) * 4) + 3) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) ^ (((((((threadIdx.y & 1) * 4) + 3) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) >> 3) & 7)) * 8))]))
                                    );
@@ -504,6 +506,41 @@ spec =
                                (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = *reinterpret_cast<float*>(&c71));
                                (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = *reinterpret_cast<float*>(&c72));
                                (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = *reinterpret_cast<float*>(&c73));
+                           }
+
+                           """
+
+        it "renders an in-place movmatrix for every register in a fragment" $ do
+            Codegen.generateWith
+                (Codegen.Config [Codegen.CudaFp16Header])
+                ( kernel "transpose_fragment" $ do
+                    body $ do
+                        tile <- shared F16 "tile" (int 64)
+                        fragment <-
+                            ldMatrix
+                                "fragment"
+                                LdX2
+                                LdMatrixNormal
+                                (tile ! threadIdxX)
+                        movMatrix fragment
+                )
+                `shouldBe` """
+                           #include <cuda_fp16.h>
+
+                           extern "C" __global__ void transpose_fragment() {
+                               __shared__ __half tile[64];
+                               uint32_t fragment0;
+                               uint32_t fragment1;
+                               asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0,%1}, [%2];"
+                                   : "=r"(fragment0), "=r"(fragment1)
+                                   : "r"(__cvta_generic_to_shared(&tile[threadIdx.x]))
+                               );
+                               asm volatile("movmatrix.sync.aligned.m8n8.trans.b16 %0, %0;"
+                                   : "+r"(fragment0)
+                               );
+                               asm volatile("movmatrix.sync.aligned.m8n8.trans.b16 %0, %0;"
+                                   : "+r"(fragment1)
+                               );
                            }
 
                            """

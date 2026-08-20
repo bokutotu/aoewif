@@ -1,30 +1,28 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Aoewif.Target.Cuda.Ampere.Render (
-    ldMatrixInfo,
-) where
+module Aoewif.Target.Cuda.Ampere.Render () where
 
 import           Aoewif.Target.Cuda.Ampere.Instruction (AmpereOp (..),
                                                         CacheOp (..),
                                                         CpAsyncSize (..),
                                                         LdMatrixForm (..),
-                                                        MmaShape (..))
+                                                        LdMatrixMode (..),
+                                                        MmaShape (..),
+                                                        ldMatrixRegisterCount)
 import           Aoewif.Target.Cuda.Codegen            (indent, renderExpr)
 import           Aoewif.Target.Cuda.Syntax             (Expr)
 import           Aoewif.Target.Cuda.TensorCoreOp       (RenderOp (..))
 import           Data.List                             (intercalate)
-
--- The extension socket: AmpereOp is defined in Instruction and RenderOp in
--- TensorCoreOp, so the instance is intentionally orphaned here where the asm
--- rendering lives.
 
 instance RenderOp AmpereOp where
     renderOp indentation op =
         case op of
             Mma shape aRegisters bRegisters dRegisters ->
                 renderMma indentation shape aRegisters bRegisters dRegisters
-            LdMatrix form registers address ->
-                renderLdMatrix indentation form registers address
+            LdMatrix mode form registers address ->
+                renderLdMatrix indentation mode form registers address
+            MovMatrix register ->
+                renderMovMatrix indentation register
             CpAsync cache size sourceSize destination source ->
                 renderCpAsync indentation cache size sourceSize destination source
             CommitGroup ->
@@ -78,13 +76,14 @@ renderMma indentation shape aRegisters bRegisters dRegisters =
             ++ placeholders 0 dCount
             ++ "}"
 
-renderLdMatrix :: Int -> LdMatrixForm -> [Expr] -> Expr -> String
-renderLdMatrix indentation form registers address =
+renderLdMatrix :: Int -> LdMatrixMode -> LdMatrixForm -> [Expr] -> Expr -> String
+renderLdMatrix indentation mode form registers address =
     unlines
         [ asmOpen
             indentation
             ( "ldmatrix.sync.aligned.m8n8."
                 ++ formTag
+                ++ ldMatrixModeTag mode
                 ++ ".shared.b16 {"
                 ++ placeholders 0 registerCount
                 ++ "}, ["
@@ -97,10 +96,17 @@ renderLdMatrix indentation form registers address =
         , indent indentation ++ ");"
         ]
   where
-    (formTag, registerCount) = ldMatrixInfo form
+    formTag = ldMatrixFormTag form
+    registerCount = ldMatrixRegisterCount form
 
--- With a source byte count, fewer than cp-size bytes are copied and the rest
--- of the destination is zero-filled; only the .ca variant exists in PTX.
+renderMovMatrix :: Int -> Expr -> String
+renderMovMatrix indentation register =
+    unlines
+        [ asmOpen indentation "movmatrix.sync.aligned.m8n8.trans.b16 %0, %0;"
+        , indent (indentation + 1) ++ ": \"+r\"(" ++ renderExpr register ++ ")"
+        , indent indentation ++ ");"
+        ]
+
 renderCpAsync :: Int -> CacheOp -> CpAsyncSize -> Maybe Expr -> Expr -> Expr -> String
 renderCpAsync indentation cache size sourceSize destination source =
     unlines
@@ -148,10 +154,14 @@ sharedAddress :: Expr -> String
 sharedAddress address =
     "__cvta_generic_to_shared(&" ++ renderExpr address ++ ")"
 
-ldMatrixInfo :: LdMatrixForm -> (String, Int)
-ldMatrixInfo LdX1 = ("x1", 1)
-ldMatrixInfo LdX2 = ("x2", 2)
-ldMatrixInfo LdX4 = ("x4", 4)
+ldMatrixFormTag :: LdMatrixForm -> String
+ldMatrixFormTag LdX1 = "x1"
+ldMatrixFormTag LdX2 = "x2"
+ldMatrixFormTag LdX4 = "x4"
+
+ldMatrixModeTag :: LdMatrixMode -> String
+ldMatrixModeTag LdMatrixNormal    = ""
+ldMatrixModeTag LdMatrixTranspose = ".trans"
 
 cacheTag :: CacheOp -> String
 cacheTag CacheAll    = "ca"
