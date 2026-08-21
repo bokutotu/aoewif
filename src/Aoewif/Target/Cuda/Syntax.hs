@@ -93,8 +93,7 @@ data Stmt
     | SharedDecl Type Name Expr
     | ExprStmt Expr
     | If Expr [Stmt] (Maybe [Stmt])
-    | -- init statements, condition, update expression, body
-      For [Stmt] Expr (Maybe Expr) [Stmt]
+    | For [Stmt] Expr (Maybe Expr) [Stmt]
     | Op TensorCoreOp
     deriving stock (Show)
 
