@@ -1,7 +1,6 @@
 module Aoewif.Target.Cuda.Sm80.Instruction (
     Sm80Op (..),
-    CacheOp (..),
-    CpAsyncSize (..),
+    CpAsyncShape (..),
     Fragment (..),
     LdMatrixForm (..),
     LdMatrixMode (..),
@@ -12,9 +11,13 @@ module Aoewif.Target.Cuda.Sm80.Instruction (
 import           Aoewif.Target.Cuda.Syntax (Expr)
 
 data MmaShape
-    = M16N8K8F16
-    | M16N8K8Tf32
-    | M16N8K16Bf16
+    = M8N8K4F16
+    | M16N8K8F16
+    | M16N8K16F16
+    | M16N8K8BF16
+    | M16N8K16BF16
+    | M16N8K4TF32
+    | M16N8K8TF32
     | M8N8K4F64
     deriving stock (Eq, Show)
 
@@ -29,22 +32,18 @@ data LdMatrixMode
     | LdMatrixTranspose
     deriving stock (Eq, Show)
 
-data CacheOp
-    = CacheAll
-    | CacheGlobal
-    deriving stock (Eq, Show)
-
-data CpAsyncSize
-    = Bytes4
-    | Bytes8
-    | Bytes16
+data CpAsyncShape
+    = CacheAll4
+    | CacheAll8
+    | CacheAll16
+    | CacheGlobal16
     deriving stock (Eq, Show)
 
 data Sm80Op
     = Mma MmaShape [Expr] [Expr] [Expr]
     | LdMatrix LdMatrixMode LdMatrixForm [Expr] Expr
     | MovMatrix Expr
-    | CpAsync CacheOp CpAsyncSize (Maybe Expr) Expr Expr
+    | CpAsync CpAsyncShape (Maybe Expr) Expr Expr
     | CommitGroup
     | WaitGroup (Maybe Int)
     deriving stock (Show)

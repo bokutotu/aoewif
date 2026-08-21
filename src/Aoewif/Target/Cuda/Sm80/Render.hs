@@ -3,8 +3,7 @@
 module Aoewif.Target.Cuda.Sm80.Render () where
 
 import           Aoewif.Target.Cuda.Codegen          (indent, renderExpr)
-import           Aoewif.Target.Cuda.Sm80.Instruction (CacheOp (..),
-                                                      CpAsyncSize (..),
+import           Aoewif.Target.Cuda.Sm80.Instruction (CpAsyncShape (..),
                                                       LdMatrixForm (..),
                                                       LdMatrixMode (..),
                                                       MmaShape (..),
@@ -23,8 +22,8 @@ instance RenderOp Sm80Op where
                 renderLdMatrix indentation mode form registers address
             MovMatrix register ->
                 renderMovMatrix indentation register
-            CpAsync cache size sourceSize destination source ->
-                renderCpAsync indentation cache size sourceSize destination source
+            CpAsync shape sourceSize destination source ->
+                renderCpAsync indentation shape sourceSize destination source
             CommitGroup ->
                 asmLine indentation "cp.async.commit_group;"
             WaitGroup groups ->
@@ -38,12 +37,20 @@ data MmaInfo = MmaInfo
     }
 
 mmaInfo :: MmaShape -> MmaInfo
+mmaInfo M8N8K4F16 =
+    MmaInfo "m8n8k4.row.col.f32.f16.f16.f32" 2 2 8
 mmaInfo M16N8K8F16 =
     MmaInfo "m16n8k8.row.col.f32.f16.f16.f32" 2 1 4
-mmaInfo M16N8K8Tf32 =
-    MmaInfo "m16n8k8.row.col.f32.tf32.tf32.f32" 4 2 4
-mmaInfo M16N8K16Bf16 =
+mmaInfo M16N8K16F16 =
+    MmaInfo "m16n8k16.row.col.f32.f16.f16.f32" 4 2 4
+mmaInfo M16N8K8BF16 =
+    MmaInfo "m16n8k8.row.col.f32.bf16.bf16.f32" 2 1 4
+mmaInfo M16N8K16BF16 =
     MmaInfo "m16n8k16.row.col.f32.bf16.bf16.f32" 4 2 4
+mmaInfo M16N8K4TF32 =
+    MmaInfo "m16n8k4.row.col.f32.tf32.tf32.f32" 2 1 4
+mmaInfo M16N8K8TF32 =
+    MmaInfo "m16n8k8.row.col.f32.tf32.tf32.f32" 4 2 4
 mmaInfo M8N8K4F64 =
     MmaInfo "m8n8k4.row.col.f64.f64.f64.f64" 1 1 2
 
@@ -107,8 +114,8 @@ renderMovMatrix indentation register =
         , indent indentation ++ ");"
         ]
 
-renderCpAsync :: Int -> CacheOp -> CpAsyncSize -> Maybe Expr -> Expr -> Expr -> String
-renderCpAsync indentation cache size sourceSize destination source =
+renderCpAsync :: Int -> CpAsyncShape -> Maybe Expr -> Expr -> Expr -> String
+renderCpAsync indentation shape sourceSize destination source =
     unlines
         [ asmOpen indentation instruction
         , indent (indentation + 1) ++ ":: " ++ intercalate ", " operands
@@ -117,9 +124,9 @@ renderCpAsync indentation cache size sourceSize destination source =
   where
     instruction =
         "cp.async."
-            ++ cacheTag cache
+            ++ cache
             ++ ".shared.global [%0], [%1], "
-            ++ show (bytes size)
+            ++ show size
             ++ maybe ";" (const ", %2;") sourceSize
     operands =
         [ "\"r\"(" ++ sharedAddress destination ++ ")"
@@ -129,6 +136,7 @@ renderCpAsync indentation cache size sourceSize destination source =
                 []
                 (\sourceSizeExpr -> ["\"r\"(" ++ renderExpr sourceSizeExpr ++ ")"])
                 sourceSize
+    (cache, size) = cpAsyncInfo shape
 
 asmOpen :: Int -> String -> String
 asmOpen indentation instruction =
@@ -163,14 +171,11 @@ ldMatrixModeTag :: LdMatrixMode -> String
 ldMatrixModeTag LdMatrixNormal    = ""
 ldMatrixModeTag LdMatrixTranspose = ".trans"
 
-cacheTag :: CacheOp -> String
-cacheTag CacheAll    = "ca"
-cacheTag CacheGlobal = "cg"
-
-bytes :: CpAsyncSize -> Int
-bytes Bytes4  = 4
-bytes Bytes8  = 8
-bytes Bytes16 = 16
+cpAsyncInfo :: CpAsyncShape -> (String, Int)
+cpAsyncInfo CacheAll4     = ("ca", 4)
+cpAsyncInfo CacheAll8     = ("ca", 8)
+cpAsyncInfo CacheAll16    = ("ca", 16)
+cpAsyncInfo CacheGlobal16 = ("cg", 16)
 
 waitGroupInstruction :: Maybe Int -> String
 waitGroupInstruction Nothing = "cp.async.wait_all;"

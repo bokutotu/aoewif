@@ -25,6 +25,7 @@ data Type
     | USize
     | F16
     | BF16
+    | TF32
     | F32
     | Const Type
     | Pointer Type

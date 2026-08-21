@@ -1,7 +1,6 @@
 module Aoewif.Target.Cuda.Sm80 (
     Sm80Op (..),
-    CacheOp (..),
-    CpAsyncSize (..),
+    CpAsyncShape (..),
     Fragment,
     LdMatrixForm (..),
     LdMatrixMode (..),

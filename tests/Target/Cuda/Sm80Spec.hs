@@ -4,6 +4,7 @@ import qualified Aoewif.Target.Cuda.Codegen          as Codegen
 import           Aoewif.Target.Cuda.DSL
 import           Aoewif.Target.Cuda.Sm80
 import           Aoewif.Target.Cuda.Sm80.Instruction (Fragment (..))
+import           Aoewif.Target.Cuda.TensorCoreOp     (RenderOp (renderOp))
 import           Control.Monad                       (forM, forM_)
 import           Test.Hspec                          (Spec, describe, it,
                                                       shouldBe)
@@ -11,6 +12,138 @@ import           Test.Hspec                          (Spec, describe, it,
 spec :: Spec
 spec =
     describe "Sm80 tensor core instructions" $ do
+        it "renders every floating-point MMA shape" $ do
+            fmap
+                (renderOp 0)
+                [ Mma
+                    M8N8K4F16
+                    [var "a0", var "a1"]
+                    [var "b0", var "b1"]
+                    [ var "d0"
+                    , var "d1"
+                    , var "d2"
+                    , var "d3"
+                    , var "d4"
+                    , var "d5"
+                    , var "d6"
+                    , var "d7"
+                    ]
+                , Mma
+                    M16N8K8F16
+                    [var "a0", var "a1"]
+                    [var "b0"]
+                    [var "d0", var "d1", var "d2", var "d3"]
+                , Mma
+                    M16N8K16F16
+                    [var "a0", var "a1", var "a2", var "a3"]
+                    [var "b0", var "b1"]
+                    [var "d0", var "d1", var "d2", var "d3"]
+                , Mma
+                    M16N8K8BF16
+                    [var "a0", var "a1"]
+                    [var "b0"]
+                    [var "d0", var "d1", var "d2", var "d3"]
+                , Mma
+                    M16N8K16BF16
+                    [var "a0", var "a1", var "a2", var "a3"]
+                    [var "b0", var "b1"]
+                    [var "d0", var "d1", var "d2", var "d3"]
+                , Mma
+                    M16N8K4TF32
+                    [var "a0", var "a1"]
+                    [var "b0"]
+                    [var "d0", var "d1", var "d2", var "d3"]
+                , Mma
+                    M16N8K8TF32
+                    [var "a0", var "a1", var "a2", var "a3"]
+                    [var "b0", var "b1"]
+                    [var "d0", var "d1", var "d2", var "d3"]
+                , Mma
+                    M8N8K4F64
+                    [var "a0"]
+                    [var "b0"]
+                    [var "d0", var "d1"]
+                ]
+                `shouldBe` [ unlines
+                                [ "asm volatile(\"mma.sync.aligned.m8n8k4.row.col.f32.f16.f16.f32 {%0,%1,%2,%3,%4,%5,%6,%7}, {%8,%9}, {%10,%11}, {%0,%1,%2,%3,%4,%5,%6,%7};\""
+                                , "    : \"+r\"(d0), \"+r\"(d1), \"+r\"(d2), \"+r\"(d3), \"+r\"(d4), \"+r\"(d5), \"+r\"(d6), \"+r\"(d7)"
+                                , "    : \"r\"(a0), \"r\"(a1), \"r\"(b0), \"r\"(b1)"
+                                , ");"
+                                ]
+                           , unlines
+                                [ "asm volatile(\"mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};\""
+                                , "    : \"+r\"(d0), \"+r\"(d1), \"+r\"(d2), \"+r\"(d3)"
+                                , "    : \"r\"(a0), \"r\"(a1), \"r\"(b0)"
+                                , ");"
+                                ]
+                           , unlines
+                                [ "asm volatile(\"mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\""
+                                , "    : \"+r\"(d0), \"+r\"(d1), \"+r\"(d2), \"+r\"(d3)"
+                                , "    : \"r\"(a0), \"r\"(a1), \"r\"(a2), \"r\"(a3), \"r\"(b0), \"r\"(b1)"
+                                , ");"
+                                ]
+                           , unlines
+                                [ "asm volatile(\"mma.sync.aligned.m16n8k8.row.col.f32.bf16.bf16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};\""
+                                , "    : \"+r\"(d0), \"+r\"(d1), \"+r\"(d2), \"+r\"(d3)"
+                                , "    : \"r\"(a0), \"r\"(a1), \"r\"(b0)"
+                                , ");"
+                                ]
+                           , unlines
+                                [ "asm volatile(\"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\""
+                                , "    : \"+r\"(d0), \"+r\"(d1), \"+r\"(d2), \"+r\"(d3)"
+                                , "    : \"r\"(a0), \"r\"(a1), \"r\"(a2), \"r\"(a3), \"r\"(b0), \"r\"(b1)"
+                                , ");"
+                                ]
+                           , unlines
+                                [ "asm volatile(\"mma.sync.aligned.m16n8k4.row.col.f32.tf32.tf32.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};\""
+                                , "    : \"+r\"(d0), \"+r\"(d1), \"+r\"(d2), \"+r\"(d3)"
+                                , "    : \"r\"(a0), \"r\"(a1), \"r\"(b0)"
+                                , ");"
+                                ]
+                           , unlines
+                                [ "asm volatile(\"mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\""
+                                , "    : \"+r\"(d0), \"+r\"(d1), \"+r\"(d2), \"+r\"(d3)"
+                                , "    : \"r\"(a0), \"r\"(a1), \"r\"(a2), \"r\"(a3), \"r\"(b0), \"r\"(b1)"
+                                , ");"
+                                ]
+                           , unlines
+                                [ "asm volatile(\"mma.sync.aligned.m8n8k4.row.col.f64.f64.f64.f64 {%0,%1}, {%2}, {%3}, {%0,%1};\""
+                                , "    : \"+r\"(d0), \"+r\"(d1)"
+                                , "    : \"r\"(a0), \"r\"(b0)"
+                                , ");"
+                                ]
+                           ]
+
+        it "renders every cp.async cache and size shape" $ do
+            fmap
+                (renderOp 0)
+                [ CpAsync CacheAll4 Nothing (var "destination") (var "source")
+                , CpAsync CacheAll8 Nothing (var "destination") (var "source")
+                , CpAsync CacheAll16 Nothing (var "destination") (var "source")
+                , CpAsync CacheGlobal16 Nothing (var "destination") (var "source")
+                ]
+                `shouldBe` [ unlines
+                                [ "asm volatile(\"cp.async.ca.shared.global [%0], [%1], 4;\""
+                                , "    :: \"r\"(__cvta_generic_to_shared(&destination)), \"l\"(&source)"
+                                , ");"
+                                ]
+                           , unlines
+                                [ "asm volatile(\"cp.async.ca.shared.global [%0], [%1], 8;\""
+                                , "    :: \"r\"(__cvta_generic_to_shared(&destination)), \"l\"(&source)"
+                                , ");"
+                                ]
+                           , unlines
+                                [ "asm volatile(\"cp.async.ca.shared.global [%0], [%1], 16;\""
+                                , "    :: \"r\"(__cvta_generic_to_shared(&destination)), \"l\"(&source)"
+                                , ");"
+                                ]
+                           , unlines
+                                [ "asm volatile(\"cp.async.cg.shared.global [%0], [%1], 16;\""
+                                , "    :: \"r\"(__cvta_generic_to_shared(&destination)), \"l\"(&source)"
+                                , ");"
+                                ]
+                           ]
+
         it "renders a swizzled GEMM pipelined with cp.async over a k-loop" $ do
             Codegen.generateWith
                 (Codegen.Config [Codegen.CudaFp16Header])
@@ -30,8 +163,7 @@ spec =
                         zeroFragment accumulator
                         for_ (define U32 "kk" (int 0)) (.< k) (\kk -> kk .+ int 16) $ \kk -> do
                             cpAsync
-                                CacheGlobal
-                                Bytes16
+                                CacheGlobal16
                                 Nothing
                                 (smemA ! swz threadIdxX)
                                 ( a
@@ -42,8 +174,7 @@ spec =
                                       )
                                 )
                             cpAsync
-                                CacheGlobal
-                                Bytes16
+                                CacheGlobal16
                                 Nothing
                                 (smemB ! swz threadIdxX)
                                 ( b
@@ -143,8 +274,7 @@ spec =
                             swz granule = granule .^ ((granule .>> int 3) .& int 7)
                             loadA kk =
                                 cpAsync
-                                    CacheGlobal
-                                    Bytes16
+                                    CacheGlobal16
                                     Nothing
                                     ( smemA
                                         ! ( ((kk .>> int 4) .& int 1)
@@ -163,8 +293,7 @@ spec =
                                     )
                             loadB kk =
                                 cpAsync
-                                    CacheGlobal
-                                    Bytes16
+                                    CacheGlobal16
                                     Nothing
                                     ( smemB
                                         ! ( ((kk .>> int 4) .& int 1)
@@ -554,8 +683,7 @@ spec =
                     body $ do
                         tile <- shared F16 "tile" (int 64)
                         cpAsync
-                            CacheAll
-                            Bytes16
+                            CacheAll16
                             (Just remaining)
                             (tile ! threadIdxX)
                             (source ! threadIdxX)

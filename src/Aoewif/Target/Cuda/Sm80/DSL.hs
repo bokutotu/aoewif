@@ -11,7 +11,7 @@ module Aoewif.Target.Cuda.Sm80.DSL (
 
 import           Aoewif.Target.Cuda.DSL              (Block, Type (U32),
                                                       declare, emit, int, (.=))
-import           Aoewif.Target.Cuda.Sm80.Instruction (CacheOp, CpAsyncSize,
+import           Aoewif.Target.Cuda.Sm80.Instruction (CpAsyncShape,
                                                       Fragment (..),
                                                       LdMatrixForm,
                                                       LdMatrixMode, MmaShape,
@@ -58,9 +58,9 @@ mma shape (Fragment aRegisters) (Fragment bRegisters) (Fragment dRegisters) =
             )
         )
 
-cpAsync :: CacheOp -> CpAsyncSize -> Maybe Expr -> Expr -> Expr -> Block ()
-cpAsync cache size sourceSize destination source =
-    emit (Op (TensorCoreOp (CpAsync cache size sourceSize destination source)))
+cpAsync :: CpAsyncShape -> Maybe Expr -> Expr -> Expr -> Block ()
+cpAsync shape sourceSize destination source =
+    emit (Op (TensorCoreOp (CpAsync shape sourceSize destination source)))
 
 commitGroup :: Block ()
 commitGroup =
