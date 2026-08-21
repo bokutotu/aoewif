@@ -4,3 +4,4 @@ dist-newstyle
 /.pre-commit-config.yaml
 /aoewif.cabal
 *tags
+*ccls*

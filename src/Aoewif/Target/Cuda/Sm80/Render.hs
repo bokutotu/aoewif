@@ -1,20 +1,20 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Aoewif.Target.Cuda.Ampere.Render () where
+module Aoewif.Target.Cuda.Sm80.Render () where
 
-import           Aoewif.Target.Cuda.Ampere.Instruction (AmpereOp (..),
-                                                        CacheOp (..),
-                                                        CpAsyncSize (..),
-                                                        LdMatrixForm (..),
-                                                        LdMatrixMode (..),
-                                                        MmaShape (..),
-                                                        ldMatrixRegisterCount)
-import           Aoewif.Target.Cuda.Codegen            (indent, renderExpr)
-import           Aoewif.Target.Cuda.Syntax             (Expr)
-import           Aoewif.Target.Cuda.TensorCoreOp       (RenderOp (..))
-import           Data.List                             (intercalate)
+import           Aoewif.Target.Cuda.Codegen          (indent, renderExpr)
+import           Aoewif.Target.Cuda.Sm80.Instruction (CacheOp (..),
+                                                      CpAsyncSize (..),
+                                                      LdMatrixForm (..),
+                                                      LdMatrixMode (..),
+                                                      MmaShape (..),
+                                                      Sm80Op (..),
+                                                      ldMatrixRegisterCount)
+import           Aoewif.Target.Cuda.Syntax           (Expr)
+import           Aoewif.Target.Cuda.TensorCoreOp     (RenderOp (..))
+import           Data.List                           (intercalate)
 
-instance RenderOp AmpereOp where
+instance RenderOp Sm80Op where
     renderOp indentation op =
         case op of
             Mma shape aRegisters bRegisters dRegisters ->

@@ -1,16 +1,16 @@
-module Target.Cuda.AmpereSpec (spec) where
+module Target.Cuda.Sm80Spec (spec) where
 
-import           Aoewif.Target.Cuda.Ampere
-import           Aoewif.Target.Cuda.Ampere.Instruction (Fragment (..))
-import qualified Aoewif.Target.Cuda.Codegen            as Codegen
+import qualified Aoewif.Target.Cuda.Codegen          as Codegen
 import           Aoewif.Target.Cuda.DSL
-import           Control.Monad                         (forM, forM_)
-import           Test.Hspec                            (Spec, describe, it,
-                                                        shouldBe)
+import           Aoewif.Target.Cuda.Sm80
+import           Aoewif.Target.Cuda.Sm80.Instruction (Fragment (..))
+import           Control.Monad                       (forM, forM_)
+import           Test.Hspec                          (Spec, describe, it,
+                                                      shouldBe)
 
 spec :: Spec
 spec =
-    describe "Ampere tensor core instructions" $ do
+    describe "Sm80 tensor core instructions" $ do
         it "renders a swizzled GEMM pipelined with cp.async over a k-loop" $ do
             Codegen.generateWith
                 (Codegen.Config [Codegen.CudaFp16Header])

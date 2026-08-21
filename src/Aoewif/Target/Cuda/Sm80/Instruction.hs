@@ -1,5 +1,5 @@
-module Aoewif.Target.Cuda.Ampere.Instruction (
-    AmpereOp (..),
+module Aoewif.Target.Cuda.Sm80.Instruction (
+    Sm80Op (..),
     CacheOp (..),
     CpAsyncSize (..),
     Fragment (..),
@@ -40,7 +40,7 @@ data CpAsyncSize
     | Bytes16
     deriving stock (Eq, Show)
 
-data AmpereOp
+data Sm80Op
     = Mma MmaShape [Expr] [Expr] [Expr]
     | LdMatrix LdMatrixMode LdMatrixForm [Expr] Expr
     | MovMatrix Expr

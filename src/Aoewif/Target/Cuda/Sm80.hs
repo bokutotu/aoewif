@@ -1,5 +1,5 @@
-module Aoewif.Target.Cuda.Ampere (
-    AmpereOp (..),
+module Aoewif.Target.Cuda.Sm80 (
+    Sm80Op (..),
     CacheOp (..),
     CpAsyncSize (..),
     Fragment,
@@ -16,6 +16,6 @@ module Aoewif.Target.Cuda.Ampere (
     zeroFragment,
 ) where
 
-import           Aoewif.Target.Cuda.Ampere.DSL
-import           Aoewif.Target.Cuda.Ampere.Instruction
-import           Aoewif.Target.Cuda.Ampere.Render      ()
+import           Aoewif.Target.Cuda.Sm80.DSL
+import           Aoewif.Target.Cuda.Sm80.Instruction
+import           Aoewif.Target.Cuda.Sm80.Render      ()

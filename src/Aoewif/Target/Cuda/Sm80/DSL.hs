@@ -1,4 +1,4 @@
-module Aoewif.Target.Cuda.Ampere.DSL (
+module Aoewif.Target.Cuda.Sm80.DSL (
     commitGroup,
     cpAsync,
     declareFragment,
@@ -9,18 +9,17 @@ module Aoewif.Target.Cuda.Ampere.DSL (
     zeroFragment,
 ) where
 
-import           Aoewif.Target.Cuda.Ampere.Instruction (AmpereOp (..), CacheOp,
-                                                        CpAsyncSize,
-                                                        Fragment (..),
-                                                        LdMatrixForm,
-                                                        LdMatrixMode, MmaShape,
-                                                        ldMatrixRegisterCount)
-import           Aoewif.Target.Cuda.Ampere.Render      ()
-import           Aoewif.Target.Cuda.DSL                (Block, Type (U32),
-                                                        declare, emit, int,
-                                                        (.=))
-import           Aoewif.Target.Cuda.Syntax             (Expr, Stmt (Op))
-import           Aoewif.Target.Cuda.TensorCoreOp       (TensorCoreOp (TensorCoreOp))
+import           Aoewif.Target.Cuda.DSL              (Block, Type (U32),
+                                                      declare, emit, int, (.=))
+import           Aoewif.Target.Cuda.Sm80.Instruction (CacheOp, CpAsyncSize,
+                                                      Fragment (..),
+                                                      LdMatrixForm,
+                                                      LdMatrixMode, MmaShape,
+                                                      Sm80Op (..),
+                                                      ldMatrixRegisterCount)
+import           Aoewif.Target.Cuda.Sm80.Render      ()
+import           Aoewif.Target.Cuda.Syntax           (Expr, Stmt (Op))
+import           Aoewif.Target.Cuda.TensorCoreOp     (TensorCoreOp (TensorCoreOp))
 
 declareFragment :: String -> Int -> Block Fragment
 declareFragment prefix registerCount =
