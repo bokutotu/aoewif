@@ -120,6 +120,24 @@ spec =
 
                            """
 
+        it "renders configured TensorFloat-32 types and headers" $ do
+            Codegen.generateWith
+                (Codegen.Config [Codegen.CudaTf32Header])
+                ( kernel "tf32_types" $ do
+                    source <- parameter (Pointer (Const TF32)) "source"
+                    result <- parameter (Pointer TF32) "result"
+                    body $
+                        result ! threadIdxX .= source ! threadIdxX
+                )
+                `shouldBe` """
+                           #include <cuda_tf32.h>
+
+                           extern "C" __global__ void tf32_types(__nv_tf32 const* source, __nv_tf32* result) {
+                               (result[threadIdx.x] = source[threadIdx.x]);
+                           }
+
+                           """
+
         it "renders the remaining syntax forms" $ do
             Codegen.generate
                 ( kernel "syntax" $ do

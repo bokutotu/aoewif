@@ -15,6 +15,7 @@ import           Data.List                       (intercalate)
 data Include
     = CudaFp16Header
     | CudaBf16Header
+    | CudaTf32Header
     deriving stock (Eq, Show)
 
 newtype Config = Config
@@ -44,6 +45,7 @@ renderIncludes configuredIncludes =
 renderInclude :: Include -> String
 renderInclude CudaFp16Header = "#include <cuda_fp16.h>"
 renderInclude CudaBf16Header = "#include <cuda_bf16.h>"
+renderInclude CudaTf32Header = "#include <cuda_tf32.h>"
 
 renderParameter :: Syntax.Parameter -> String
 renderParameter (Syntax.Parameter parameterType name) =
@@ -55,6 +57,7 @@ renderType Syntax.U32 = "uint32_t"
 renderType Syntax.USize = "size_t"
 renderType Syntax.F16 = "__half"
 renderType Syntax.BF16 = "__nv_bfloat16"
+renderType Syntax.TF32 = "__nv_tf32"
 renderType Syntax.F32 = "float"
 renderType (Syntax.Const valueType) =
     renderType valueType ++ " const"

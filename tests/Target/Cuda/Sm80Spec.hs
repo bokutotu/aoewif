@@ -358,8 +358,14 @@ spec =
                                         let aRegs = fragmentRegisters (aFrags !! r16)
                                             bRegs = fragmentRegisters (bFrags !! c8)
                                             acc = accFrags !! (r16 * 4 + c8)
-                                        mma M16N8K8F16 (Fragment [head aRegs, aRegs !! 2]) (Fragment [head bRegs]) acc
-                                        mma M16N8K8F16 (Fragment [aRegs !! 1, aRegs !! 3]) (Fragment [bRegs !! 1]) acc
+                                        forM_
+                                            (zip3 (take 2 aRegs) (drop 2 aRegs) bRegs)
+                                            $ \(aLowRegister, aHighRegister, bRegister) ->
+                                                mma
+                                                    M16N8K8F16
+                                                    (Fragment [aLowRegister, aHighRegister])
+                                                    (Fragment [bRegister])
+                                                    acc
                         loadA (int 0)
                         loadB (int 0)
                         commitGroup

@@ -12,6 +12,7 @@ dependencies:
 language: GHC2024
 ghc-options:
   - -Wall
+  - -Werror
 
 library:
   source-dirs: src

@@ -215,8 +215,7 @@ lhs .= rhs =
     expr_ (Binary Assign lhs rhs)
 
 emit :: Stmt -> Block ()
-emit statement =
-    Block ([statement], ())
+emit statement = Block ([statement], ())
 
 blockStatements :: Block () -> [Stmt]
 blockStatements (Block (result, ())) = result
