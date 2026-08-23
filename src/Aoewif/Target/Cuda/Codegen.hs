@@ -175,6 +175,14 @@ renderExpr expr =
                 ++ "*>(&"
                 ++ renderExpr operand
                 ++ ")"
+        Syntax.Unary Syntax.LogicalNot operand ->
+            "(!"
+                ++ renderExpr operand
+                ++ ")"
+        Syntax.Unary Syntax.BitComplement operand ->
+            "(~"
+                ++ renderExpr operand
+                ++ ")"
         Syntax.Binary operator lhs rhs ->
             "("
                 ++ renderExpr lhs
@@ -182,6 +190,14 @@ renderExpr expr =
                 ++ renderBinaryOp operator
                 ++ " "
                 ++ renderExpr rhs
+                ++ ")"
+        Syntax.Conditional condition consequent alternative ->
+            "("
+                ++ renderExpr condition
+                ++ " ? "
+                ++ renderExpr consequent
+                ++ " : "
+                ++ renderExpr alternative
                 ++ ")"
         Syntax.Subscript value index ->
             renderExpr value
@@ -195,15 +211,24 @@ renderExpr expr =
                 ++ ")"
 
 renderBinaryOp :: Syntax.BinaryOp -> String
-renderBinaryOp Syntax.Assign     = "="
-renderBinaryOp Syntax.Add        = "+"
-renderBinaryOp Syntax.Subtract   = "-"
-renderBinaryOp Syntax.Multiply   = "*"
-renderBinaryOp Syntax.Modulo     = "%"
-renderBinaryOp Syntax.LessThan   = "<"
-renderBinaryOp Syntax.ShiftRight = ">>"
-renderBinaryOp Syntax.BitAnd     = "&"
-renderBinaryOp Syntax.BitXor     = "^"
+renderBinaryOp Syntax.Assign             = "="
+renderBinaryOp Syntax.Add                = "+"
+renderBinaryOp Syntax.Subtract           = "-"
+renderBinaryOp Syntax.Multiply           = "*"
+renderBinaryOp Syntax.Divide             = "/"
+renderBinaryOp Syntax.Modulo             = "%"
+renderBinaryOp Syntax.Equal              = "=="
+renderBinaryOp Syntax.NotEqual           = "!="
+renderBinaryOp Syntax.LessThan           = "<"
+renderBinaryOp Syntax.LessThanOrEqual    = "<="
+renderBinaryOp Syntax.GreaterThanOrEqual = ">="
+renderBinaryOp Syntax.LogicalAnd         = "&&"
+renderBinaryOp Syntax.LogicalOr          = "||"
+renderBinaryOp Syntax.ShiftLeft          = "<<"
+renderBinaryOp Syntax.ShiftRight         = ">>"
+renderBinaryOp Syntax.BitAnd             = "&"
+renderBinaryOp Syntax.BitXor             = "^"
+renderBinaryOp Syntax.BitOr              = "|"
 
 renderFloatLit :: Float -> String
 renderFloatLit value

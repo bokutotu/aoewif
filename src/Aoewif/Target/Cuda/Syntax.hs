@@ -61,6 +61,8 @@ data GridDim
 data UnaryOp
     = StaticCast Type
     | ReinterpretCast Type
+    | LogicalNot
+    | BitComplement
     deriving stock (Eq, Show)
 
 data BinaryOp
@@ -68,11 +70,20 @@ data BinaryOp
     | Add
     | Subtract
     | Multiply
+    | Divide
     | Modulo
+    | Equal
+    | NotEqual
     | LessThan
+    | LessThanOrEqual
+    | GreaterThanOrEqual
+    | LogicalAnd
+    | LogicalOr
+    | ShiftLeft
     | ShiftRight
     | BitAnd
     | BitXor
+    | BitOr
     deriving stock (Eq, Show)
 
 data Expr
@@ -85,6 +96,7 @@ data Expr
     | GridDim GridDim
     | Unary UnaryOp Expr
     | Binary BinaryOp Expr Expr
+    | Conditional Expr Expr Expr
     | Subscript Expr Expr
     | Call Expr [Expr]
     deriving stock (Eq, Show)

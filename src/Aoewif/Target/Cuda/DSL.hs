@@ -15,6 +15,7 @@ module Aoewif.Target.Cuda.DSL (
     call,
     call_,
     cast,
+    complement,
     declare,
     define,
     emit,
@@ -24,27 +25,38 @@ module Aoewif.Target.Cuda.DSL (
     gridDimX,
     gridDimY,
     gridDimZ,
+    ifElse,
     ifElse_,
     if_,
     int,
     kernel,
+    not_,
     parameter,
     shared,
+    shiftL,
+    shiftR,
     syncThreads,
     threadIdxX,
     threadIdxY,
     threadIdxZ,
     var,
+    xor,
     (!),
     (.*),
+    (./),
     (.+),
     (.-),
     (.%),
     (.=),
+    (.==),
+    (./=),
     (.<),
-    (.>>),
-    (.&),
-    (.^),
+    (.<=),
+    (.>=),
+    (.&&),
+    (.||),
+    (.&.),
+    (.|.),
 )
 where
 
@@ -132,6 +144,24 @@ cast targetType = Unary (StaticCast targetType)
 bitcast :: Type -> Expr -> Expr
 bitcast targetType = Unary (ReinterpretCast targetType)
 
+not_ :: Expr -> Expr
+not_ = Unary LogicalNot
+
+complement :: Expr -> Expr
+complement = Unary BitComplement
+
+shiftL :: Expr -> Expr -> Expr
+shiftL = Binary ShiftLeft
+
+shiftR :: Expr -> Expr -> Expr
+shiftR = Binary ShiftRight
+
+xor :: Expr -> Expr -> Expr
+xor = Binary BitXor
+
+ifElse :: Expr -> Expr -> Expr -> Expr
+ifElse = Conditional
+
 call :: Expr -> [Expr] -> Expr
 call = Call
 
@@ -172,6 +202,11 @@ infixl 7 .*
 (.*) :: Expr -> Expr -> Expr
 (.*) = Binary Multiply
 
+infixl 7 ./
+
+(./) :: Expr -> Expr -> Expr
+(./) = Binary Divide
+
 infixl 7 .%
 
 (.%) :: Expr -> Expr -> Expr
@@ -187,25 +222,42 @@ infixl 6 .-
 (.-) :: Expr -> Expr -> Expr
 (.-) = Binary Subtract
 
-infix 4 .<
+infix 4 .==, ./=, .<, .<=, .>=
+
+(.==) :: Expr -> Expr -> Expr
+(.==) = Binary Equal
+
+(./=) :: Expr -> Expr -> Expr
+(./=) = Binary NotEqual
 
 (.<) :: Expr -> Expr -> Expr
 (.<) = Binary LessThan
 
-infixl 5 .>>
+(.<=) :: Expr -> Expr -> Expr
+(.<=) = Binary LessThanOrEqual
 
-(.>>) :: Expr -> Expr -> Expr
-(.>>) = Binary ShiftRight
+(.>=) :: Expr -> Expr -> Expr
+(.>=) = Binary GreaterThanOrEqual
 
-infixl 3 .&
+infixl 7 .&.
 
-(.&) :: Expr -> Expr -> Expr
-(.&) = Binary BitAnd
+(.&.) :: Expr -> Expr -> Expr
+(.&.) = Binary BitAnd
 
-infixl 2 .^
+infixl 5 .|.
 
-(.^) :: Expr -> Expr -> Expr
-(.^) = Binary BitXor
+(.|.) :: Expr -> Expr -> Expr
+(.|.) = Binary BitOr
+
+infixr 3 .&&
+
+(.&&) :: Expr -> Expr -> Expr
+(.&&) = Binary LogicalAnd
+
+infixr 2 .||
+
+(.||) :: Expr -> Expr -> Expr
+(.||) = Binary LogicalOr
 
 infix 1 .=
 

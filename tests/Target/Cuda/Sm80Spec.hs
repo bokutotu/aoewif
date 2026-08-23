@@ -158,7 +158,7 @@ spec =
                         smemA <- shared F16 "smemA" (int 128)
                         smemB <- shared F16 "smemB" (int 64)
                         -- 128B XOR swizzle, composed from the raw operators.
-                        let swz index = index .^ ((index .>> int 3) .& int 7)
+                        let swz index = xor index (shiftR index (int 3) .&. int 7)
                         accumulator <- declareFragment "c" 4
                         zeroFragment accumulator
                         for_ (define U32 "kk" (int 0)) (.< k) (\kk -> kk .+ int 16) $ \kk -> do
@@ -167,10 +167,10 @@ spec =
                                 Nothing
                                 (smemA ! swz threadIdxX)
                                 ( a
-                                    ! ( (blockIdxY .* int 16 .+ (threadIdxX .>> int 3))
+                                    ! ( (blockIdxY .* int 16 .+ shiftR threadIdxX (int 3))
                                             .* k
                                             .+ kk
-                                            .+ (threadIdxX .& int 7)
+                                            .+ (threadIdxX .&. int 7)
                                       )
                                 )
                             cpAsync
@@ -178,12 +178,12 @@ spec =
                                 Nothing
                                 (smemB ! swz threadIdxX)
                                 ( b
-                                    ! ( (threadIdxX .>> int 3)
+                                    ! ( shiftR threadIdxX (int 3)
                                             .* n
                                             .+ blockIdxX
                                             .* int 8
                                             .+ kk
-                                            .+ (threadIdxX .& int 7)
+                                            .+ (threadIdxX .&. int 7)
                                       )
                                 )
                             commitGroup
@@ -267,27 +267,27 @@ spec =
                         mapM_ zeroFragment accFrags
                         let tid = threadIdxX
                             warp = threadIdxY
-                            warpRow = warp .>> int 1
-                            warpCol = warp .& int 1
+                            warpRow = shiftR warp (int 1)
+                            warpCol = warp .&. int 1
                             -- 128B XOR swizzle on a 16B-granule index, composed
                             -- from the raw operators.
-                            swz granule = granule .^ ((granule .>> int 3) .& int 7)
+                            swz granule = xor granule (shiftR granule (int 3) .&. int 7)
                             loadA kk =
                                 cpAsync
                                     CacheGlobal16
                                     Nothing
                                     ( smemA
-                                        ! ( ((kk .>> int 4) .& int 1)
+                                        ! ( (shiftR kk (int 4) .&. int 1)
                                                 .* int 1024
                                                 .+ swz tid
                                                 .* int 8
                                           )
                                     )
                                     ( a
-                                        ! ( (blockIdxY .* int 64 .+ (tid .>> int 1))
+                                        ! ( (blockIdxY .* int 64 .+ shiftR tid (int 1))
                                                 .* k
                                                 .+ kk
-                                                .+ (tid .& int 1)
+                                                .+ (tid .&. int 1)
                                                 .* int 8
                                           )
                                     )
@@ -296,23 +296,23 @@ spec =
                                     CacheGlobal16
                                     Nothing
                                     ( smemB
-                                        ! ( ((kk .>> int 4) .& int 1)
+                                        ! ( (shiftR kk (int 4) .&. int 1)
                                                 .* int 1024
                                                 .+ swz tid
                                                 .* int 8
                                           )
                                     )
                                     ( b
-                                        ! ( (kk .+ (tid .>> int 3))
+                                        ! ( (kk .+ shiftR tid (int 3))
                                                 .* n
                                                 .+ blockIdxX
                                                 .* int 64
-                                                .+ (tid .& int 7)
+                                                .+ (tid .&. int 7)
                                                 .* int 8
                                           )
                                     )
                             computeStage kk = do
-                                let stage = (kk .>> int 4) .& int 1
+                                let stage = shiftR kk (int 4) .&. int 1
                                 aFrags <-
                                     forM [0 :: Int, 1] $ \r16 ->
                                         ldMatrix
@@ -326,9 +326,9 @@ spec =
                                                             ( warpRow
                                                                 .* int 64
                                                                 .+ int (fromIntegral r16 * 32)
-                                                                .+ (tid .>> int 3)
+                                                                .+ shiftR tid (int 3)
                                                                 .* int 8
-                                                                .+ (tid .& int 7)
+                                                                .+ (tid .&. int 7)
                                                             )
                                                         .* int 8
                                                   )
@@ -346,9 +346,9 @@ spec =
                                                             ( warpCol
                                                                 .* int 4
                                                                 .+ int (fromIntegral c8)
-                                                                .+ (tid .>> int 3)
+                                                                .+ shiftR tid (int 3)
                                                                 .* int 8
-                                                                .+ (tid .& int 7)
+                                                                .+ (tid .&. int 7)
                                                             )
                                                         .* int 8
                                                   )
@@ -391,9 +391,9 @@ spec =
                                                 .+ warpRow
                                                 .* int 32
                                                 .+ int (fromIntegral r16 * 16)
-                                                .+ (int j .>> int 1)
+                                                .+ shiftR (int j) (int 1)
                                                 .* int 8
-                                                .+ (tid .>> int 2)
+                                                .+ shiftR tid (int 2)
                                             )
                                                 .* n
                                                 .+ blockIdxX
@@ -401,9 +401,9 @@ spec =
                                                 .+ warpCol
                                                 .* int 32
                                                 .+ int (fromIntegral c8 * 8)
-                                                .+ (int j .& int 1)
+                                                .+ (int j .&. int 1)
                                                 .* int 2
-                                                .+ (tid .& int 3)
+                                                .+ (tid .&. int 3)
                                                 .* int 2
                                           )
                                     )

@@ -85,9 +85,9 @@ spec = do
                 ( kernel "swizzled" $ body $ do
                     tile <- shared F32 "tile" (int 128)
                     tile
-                        ! ( (threadIdxX .+ int 16)
-                                .^ (((threadIdxX .+ int 16) .>> int 3) .& int 7)
-                          )
+                        ! xor
+                            (threadIdxX .+ int 16)
+                            (shiftR (threadIdxX .+ int 16) (int 3) .&. int 7)
                         .= int 0
                 )
                 `shouldBe` """
@@ -198,7 +198,11 @@ spec = do
             -- offset within a granule, so cp.async/ldmatrix addresses stay 16B
             -- aligned. Composed from the raw operators, not a DSL primitive.
             let swizzled index =
-                    ((index .>> int 3) .^ ((index .>> int 6) .& int 7)) .* int 8 .+ (index .& int 7)
+                    xor
+                        (shiftR index (int 3))
+                        (shiftR index (int 6) .&. int 7)
+                        .* int 8
+                        .+ (index .&. int 7)
             Codegen.generate
                 ( kernel "ops" $ do
                     index <- parameter U32 "index"
@@ -223,3 +227,38 @@ spec = do
                            }
 
                            """
+
+    describe "renderExpr" $
+        it "renders Haskell-style operators with Haskell fixities" $ do
+            fmap
+                Codegen.renderExpr
+                [ var "lhs" ./ var "rhs"
+                , var "lhs" .== var "rhs"
+                , var "lhs" ./= var "rhs"
+                , var "lhs" .<= var "rhs"
+                , var "lhs" .>= var "rhs"
+                , var "lhs" .&& var "rhs"
+                , var "lhs" .|| var "rhs"
+                , not_ (var "condition")
+                , complement (var "value")
+                , shiftL (var "value") (var "amount")
+                , var "lhs" .|. var "rhs"
+                , ifElse (var "condition") (var "trueValue") (var "falseValue")
+                , var "a" .|. var "b" .&. var "c"
+                , var "a" .== var "b" .&& var "c" ./= var "d" .|| var "e"
+                ]
+                `shouldBe` [ "(lhs / rhs)"
+                           , "(lhs == rhs)"
+                           , "(lhs != rhs)"
+                           , "(lhs <= rhs)"
+                           , "(lhs >= rhs)"
+                           , "(lhs && rhs)"
+                           , "(lhs || rhs)"
+                           , "(!condition)"
+                           , "(~value)"
+                           , "(value << amount)"
+                           , "(lhs | rhs)"
+                           , "(condition ? trueValue : falseValue)"
+                           , "(a | (b & c))"
+                           , "(((a == b) && (c != d)) || e)"
+                           ]
