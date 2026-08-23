@@ -2,10 +2,19 @@ module Target.Cuda.CodegenSpec (spec) where
 
 import qualified Aoewif.Target.Cuda.Codegen as Codegen
 import           Aoewif.Target.Cuda.DSL
-import           Test.Hspec                 (Spec, describe, it, shouldBe)
+import qualified Aoewif.Target.Cuda.Syntax  as Syntax
+import           Test.Hspec                 (Spec, describe, it, shouldBe,
+                                             shouldSatisfy)
 
 spec :: Spec
-spec =
+spec = do
+    describe "syncThreads" $
+        it "builds a synchronization primitive statement" $
+            kernel "sync" (body syncThreads)
+                `shouldSatisfy` \case
+                    Syntax.Kernel _ _ [Syntax.SyncThreads] -> True
+                    _ -> False
+
     describe "generate" $ do
         it "renders a CUDA kernel" $ do
             Codegen.generate

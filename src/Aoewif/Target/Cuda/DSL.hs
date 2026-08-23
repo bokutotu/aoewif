@@ -140,8 +140,7 @@ call_ function arguments =
     expr_ (call function arguments)
 
 syncThreads :: Block ()
-syncThreads =
-    call_ (var "__syncthreads") []
+syncThreads = emit SyncThreads
 
 threadIdxX, threadIdxY, threadIdxZ :: Expr
 threadIdxX = ThreadIdx ThreadIdxX

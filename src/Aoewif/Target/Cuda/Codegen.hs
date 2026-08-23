@@ -87,6 +87,8 @@ renderStmt indentation stmt =
                 ++ "["
                 ++ renderExpr extent
                 ++ "];\n"
+        Syntax.SyncThreads ->
+            indent indentation ++ "__syncthreads();\n"
         Syntax.ExprStmt expr ->
             indent indentation
                 ++ renderExpr expr

@@ -92,6 +92,7 @@ data Expr
 data Stmt
     = VarDecl Type Name (Maybe Expr)
     | SharedDecl Type Name Expr
+    | SyncThreads
     | ExprStmt Expr
     | If Expr [Stmt] (Maybe [Stmt])
     | For [Stmt] Expr (Maybe Expr) [Stmt]
