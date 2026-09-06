@@ -21,6 +21,10 @@ library:
     - Aoewif.Target.Cuda.Sm80.DSL
     - Aoewif.Target.Cuda.Sm80.Instruction
     - Aoewif.Target.Cuda.Sm80.Render
+    - Aoewif.Target.Cuda.Sm90
+    - Aoewif.Target.Cuda.Sm90.DSL
+    - Aoewif.Target.Cuda.Sm90.Instruction
+    - Aoewif.Target.Cuda.Sm90.Render
     - Aoewif.Target.Cuda.Codegen
     - Aoewif.Target.Cuda.DSL
     - Aoewif.Target.Cuda.Syntax

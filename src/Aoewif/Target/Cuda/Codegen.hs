@@ -15,7 +15,6 @@ import           Data.List                       (intercalate)
 data Include
     = CudaFp16Header
     | CudaBf16Header
-    | CudaTf32Header
     deriving stock (Eq, Show)
 
 newtype Config = Config
@@ -38,35 +37,34 @@ generateWith config (Syntax.Kernel name parameters body) =
         ++ "}\n"
 
 renderIncludes :: [Include] -> String
-renderIncludes [] = ""
 renderIncludes configuredIncludes =
-    unlines (map renderInclude configuredIncludes) ++ "\n"
+    unlines ("#include <stdint.h>" : map renderInclude configuredIncludes) ++ "\n"
 
 renderInclude :: Include -> String
 renderInclude CudaFp16Header = "#include <cuda_fp16.h>"
 renderInclude CudaBf16Header = "#include <cuda_bf16.h>"
-renderInclude CudaTf32Header = "#include <cuda_tf32.h>"
 
 renderParameter :: Syntax.Parameter -> String
 renderParameter (Syntax.Parameter parameterType name) =
     renderType parameterType ++ " " ++ renderName name
 
 renderType :: Syntax.Type -> String
-renderType Syntax.Bool = "bool"
-renderType Syntax.U32 = "uint32_t"
-renderType Syntax.USize = "size_t"
-renderType Syntax.F16 = "__half"
-renderType Syntax.BF16 = "__nv_bfloat16"
-renderType Syntax.TF32 = "__nv_tf32"
-renderType Syntax.F32 = "float"
-renderType (Syntax.Const valueType) =
-    renderType valueType ++ " const"
-renderType (Syntax.Pointer pointeeType) =
-    renderType pointeeType ++ "*"
+renderType Syntax.Bool                  = "bool"
+renderType Syntax.U32                   = "uint32_t"
+renderType Syntax.USize                 = "size_t"
+renderType Syntax.F16                   = "__half"
+renderType Syntax.BF16                  = "__nv_bfloat16"
+renderType Syntax.F32                   = "float"
+renderType (Syntax.Const valueType)     = renderType valueType ++ " const"
+renderType (Syntax.Pointer pointeeType) = renderType pointeeType ++ "*"
+
+renderAlignment :: Syntax.Alignment -> String
+renderAlignment Syntax.NaturalAlignment = ""
+renderAlignment Syntax.Align16          = "__align__(16) "
+renderAlignment Syntax.Align128         = "__align__(128) "
 
 renderStmts :: Int -> [Syntax.Stmt] -> String
-renderStmts indentation =
-    concatMap (renderStmt indentation)
+renderStmts indentation = concatMap (renderStmt indentation)
 
 renderStmt :: Int -> Syntax.Stmt -> String
 renderStmt indentation stmt =
@@ -78,9 +76,10 @@ renderStmt indentation stmt =
                 ++ renderName name
                 ++ renderInitializer initializer
                 ++ ";\n"
-        Syntax.SharedDecl elementType name extent ->
+        Syntax.SharedDecl alignment elementType name extent ->
             indent indentation
                 ++ "__shared__ "
+                ++ renderAlignment alignment
                 ++ renderType elementType
                 ++ " "
                 ++ renderName name
@@ -100,10 +99,10 @@ renderStmt indentation stmt =
                 ++ ") {\n"
                 ++ renderStmts (indentation + 1) body
                 ++ renderAlternative indentation alternative
-        Syntax.For initStmts condition update body ->
+        Syntax.For initializer condition update body ->
             indent indentation
                 ++ "for ("
-                ++ renderForInit initStmts
+                ++ renderForInit initializer
                 ++ "; "
                 ++ renderExpr condition
                 ++ "; "
@@ -130,9 +129,9 @@ renderAlternative indentation (Just body) =
         ++ indent indentation
         ++ "}\n"
 
-renderForInit :: [Syntax.Stmt] -> String
+renderForInit :: Maybe Syntax.Stmt -> String
 renderForInit =
-    intercalate "; " . map renderForInitStmt
+    maybe "" renderForInitStmt
 
 renderForInitStmt :: Syntax.Stmt -> String
 renderForInitStmt (Syntax.VarDecl variableType name initializer) =
@@ -170,11 +169,11 @@ renderExpr expr =
                 ++ renderExpr operand
                 ++ ")"
         Syntax.Unary (Syntax.ReinterpretCast targetType) operand ->
-            "*reinterpret_cast<"
+            "(*reinterpret_cast<"
                 ++ renderType targetType
                 ++ "*>(&"
                 ++ renderExpr operand
-                ++ ")"
+                ++ "))"
         Syntax.Unary Syntax.LogicalNot operand ->
             "(!"
                 ++ renderExpr operand

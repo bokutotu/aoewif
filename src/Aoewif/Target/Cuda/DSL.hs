@@ -1,4 +1,5 @@
 module Aoewif.Target.Cuda.DSL (
+    Alignment (..),
     Block,
     Expr,
     Kernel,
@@ -95,9 +96,9 @@ define variableType text initializer = do
   where
     name = Name text
 
-shared :: Type -> String -> Expr -> Block Expr
-shared elementType text extent = do
-    emit (SharedDecl elementType name extent)
+shared :: Alignment -> Type -> String -> Expr -> Block Expr
+shared alignment elementType text extent = do
+    emit (SharedDecl alignment elementType name extent)
     pure (Var name)
   where
     name = Name text
@@ -118,15 +119,14 @@ ifElse_ condition consequent alternative =
             (Just (blockStatements alternative))
         )
 
-for_ :: Block Expr -> (Expr -> Expr) -> (Expr -> Expr) -> (Expr -> Block ()) -> Block ()
-for_ initBlock condition update loopBody = do
-    let Block (initStmts, loopVar) = initBlock
+for_ :: Maybe Stmt -> Expr -> Maybe Expr -> Block () -> Block ()
+for_ initializer condition update loopBody =
     emit
         ( For
-            initStmts
-            (condition loopVar)
-            (Just (Binary Assign loopVar (update loopVar)))
-            (blockStatements (loopBody loopVar))
+            initializer
+            condition
+            update
+            (blockStatements loopBody)
         )
 
 var :: String -> Expr

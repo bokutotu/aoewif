@@ -1,4 +1,5 @@
 module Aoewif.Target.Cuda.Syntax (
+    Alignment (..),
     BinaryOp (..),
     BlockDim (..),
     BlockIdx (..),
@@ -25,13 +26,18 @@ data Type
     | USize
     | F16
     | BF16
-    | TF32
     | F32
     | Const Type
     | Pointer Type
     deriving stock (Eq, Show)
 
 data Parameter = Parameter Type Name
+    deriving stock (Eq, Show)
+
+data Alignment
+    = NaturalAlignment
+    | Align16
+    | Align128
     deriving stock (Eq, Show)
 
 data ThreadIdx
@@ -103,11 +109,11 @@ data Expr
 
 data Stmt
     = VarDecl Type Name (Maybe Expr)
-    | SharedDecl Type Name Expr
+    | SharedDecl Alignment Type Name Expr
     | SyncThreads
     | ExprStmt Expr
     | If Expr [Stmt] (Maybe [Stmt])
-    | For [Stmt] Expr (Maybe Expr) [Stmt]
+    | For (Maybe Stmt) Expr (Maybe Expr) [Stmt]
     | Op TensorCoreOp
     deriving stock (Show)
 

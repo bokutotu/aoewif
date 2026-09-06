@@ -16,9 +16,6 @@ data MmaShape
     | M16N8K16F16
     | M16N8K8BF16
     | M16N8K16BF16
-    | M16N8K4TF32
-    | M16N8K8TF32
-    | M8N8K4F64
     deriving stock (Eq, Show)
 
 data LdMatrixForm

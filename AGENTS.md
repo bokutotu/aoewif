@@ -1,3 +1,7 @@
+## Design Doc
+
+Check DESIGN.md
+
 ## Parse, Don't Validate
 
 We should critically evaluate whether `validate` or `verify` functions are actually needed. Most of the time, they aren't.

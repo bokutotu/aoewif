@@ -37,28 +37,17 @@ data MmaInfo = MmaInfo
     }
 
 mmaInfo :: MmaShape -> MmaInfo
-mmaInfo M8N8K4F16 =
-    MmaInfo "m8n8k4.row.col.f32.f16.f16.f32" 2 2 8
-mmaInfo M16N8K8F16 =
-    MmaInfo "m16n8k8.row.col.f32.f16.f16.f32" 2 1 4
-mmaInfo M16N8K16F16 =
-    MmaInfo "m16n8k16.row.col.f32.f16.f16.f32" 4 2 4
-mmaInfo M16N8K8BF16 =
-    MmaInfo "m16n8k8.row.col.f32.bf16.bf16.f32" 2 1 4
-mmaInfo M16N8K16BF16 =
-    MmaInfo "m16n8k16.row.col.f32.bf16.bf16.f32" 4 2 4
-mmaInfo M16N8K4TF32 =
-    MmaInfo "m16n8k4.row.col.f32.tf32.tf32.f32" 2 1 4
-mmaInfo M16N8K8TF32 =
-    MmaInfo "m16n8k8.row.col.f32.tf32.tf32.f32" 4 2 4
-mmaInfo M8N8K4F64 =
-    MmaInfo "m8n8k4.row.col.f64.f64.f64.f64" 1 1 2
+mmaInfo M8N8K4F16    = MmaInfo "m8n8k4.row.col.f32.f16.f16.f32" 2 2 8
+mmaInfo M16N8K8F16   = MmaInfo "m16n8k8.row.col.f32.f16.f16.f32" 2 1 4
+mmaInfo M16N8K16F16  = MmaInfo "m16n8k16.row.col.f32.f16.f16.f32" 4 2 4
+mmaInfo M16N8K8BF16  = MmaInfo "m16n8k8.row.col.f32.bf16.bf16.f32" 2 1 4
+mmaInfo M16N8K16BF16 = MmaInfo "m16n8k16.row.col.f32.bf16.bf16.f32" 4 2 4
 
 renderMma :: Int -> MmaShape -> [Expr] -> [Expr] -> [Expr] -> String
 renderMma indentation shape aRegisters bRegisters dRegisters =
     unlines
         [ asmOpen indentation ("mma.sync.aligned." ++ asmTag ++ " " ++ operands ++ ";")
-        , indent (indentation + 1) ++ ": " ++ constraints "+r" dRegisters
+        , indent (indentation + 1) ++ ": " ++ constraints "+f" dRegisters
         , indent (indentation + 1) ++ ": " ++ constraints "r" (aRegisters ++ bRegisters)
         , indent indentation ++ ");"
         ]
@@ -99,7 +88,7 @@ renderLdMatrix indentation mode form registers address =
                 ++ "];"
             )
         , indent (indentation + 1) ++ ": " ++ constraints "=r" registers
-        , indent (indentation + 1) ++ ": \"r\"(" ++ sharedAddress address ++ ")"
+        , indent (indentation + 1) ++ ": \"l\"(" ++ sharedAddress address ++ ")"
         , indent indentation ++ ");"
         ]
   where
@@ -129,7 +118,7 @@ renderCpAsync indentation shape sourceSize destination source =
             ++ show size
             ++ maybe ";" (const ", %2;") sourceSize
     operands =
-        [ "\"r\"(" ++ sharedAddress destination ++ ")"
+        [ "\"l\"(" ++ sharedAddress destination ++ ")"
         , "\"l\"(&" ++ renderExpr source ++ ")"
         ]
             ++ maybe

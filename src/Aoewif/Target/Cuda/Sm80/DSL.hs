@@ -21,28 +21,23 @@ import           Aoewif.Target.Cuda.Sm80.Render      ()
 import           Aoewif.Target.Cuda.Syntax           (Expr, Stmt (Op))
 import           Aoewif.Target.Cuda.TensorCoreOp     (TensorCoreOp (TensorCoreOp))
 
-declareFragment :: String -> Int -> Block Fragment
-declareFragment prefix registerCount =
-    Fragment <$> mapM declareRegister [0 .. registerCount - 1]
+declareFragment :: Type -> String -> Int -> Block Fragment
+declareFragment registerType prefix registerCount = Fragment <$> mapM declareRegister [0 .. registerCount - 1]
   where
-    declareRegister index =
-        declare U32 (prefix ++ show index)
+    declareRegister index = declare registerType (prefix ++ show index)
 
 zeroFragment :: Fragment -> Block ()
-zeroFragment =
-    mapM_ (.= int 0) . fragmentRegisters
+zeroFragment = mapM_ (.= int 0) . fragmentRegisters
 
 ldMatrix :: String -> LdMatrixForm -> LdMatrixMode -> Expr -> Block Fragment
 ldMatrix prefix form mode address = do
-    fragment <- declareFragment prefix (ldMatrixRegisterCount form)
+    fragment <- declareFragment U32 prefix (ldMatrixRegisterCount form)
     emit (Op (TensorCoreOp (LdMatrix mode form (fragmentRegisters fragment) address)))
     pure fragment
 
 movMatrix :: Fragment -> Block ()
 movMatrix (Fragment registers) =
-    mapM_
-        (emit . Op . TensorCoreOp . MovMatrix)
-        registers
+    mapM_ (emit . Op . TensorCoreOp . MovMatrix) registers
 
 mma :: MmaShape -> Fragment -> Fragment -> Fragment -> Block ()
 mma shape (Fragment aRegisters) (Fragment bRegisters) (Fragment dRegisters) =
@@ -59,13 +54,10 @@ mma shape (Fragment aRegisters) (Fragment bRegisters) (Fragment dRegisters) =
         )
 
 cpAsync :: CpAsyncShape -> Maybe Expr -> Expr -> Expr -> Block ()
-cpAsync shape sourceSize destination source =
-    emit (Op (TensorCoreOp (CpAsync shape sourceSize destination source)))
+cpAsync shape sourceSize destination source = emit (Op (TensorCoreOp (CpAsync shape sourceSize destination source)))
 
 commitGroup :: Block ()
-commitGroup =
-    emit (Op (TensorCoreOp CommitGroup))
+commitGroup = emit (Op (TensorCoreOp CommitGroup))
 
 waitGroup :: Maybe Int -> Block ()
-waitGroup =
-    emit . Op . TensorCoreOp . WaitGroup
+waitGroup = emit . Op . TensorCoreOp . WaitGroup
