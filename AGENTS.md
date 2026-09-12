@@ -2,6 +2,19 @@
 
 Check DESIGN.md
 
+## CUDA / PTX Specification References
+
+Prioritize the following official NVIDIA documentation when checking CUDA, PTX, or GPU architecture specifications.
+Prefer fetching the relevant documents directly with `curl -fL` before searching the internet.
+
+- [PTX ISA](https://docs.nvidia.com/cuda/parallel-thread-execution/)
+- [Inline PTX Assembly](https://docs.nvidia.com/cuda/inline-ptx-assembly/)
+- [CUDA Programming Guide](https://docs.nvidia.com/cuda/cuda-programming-guide/)
+- [CUDA Driver API](https://docs.nvidia.com/cuda/cuda-driver-api/index.html)
+- [NVIDIA Ampere Architecture In-Depth](https://developer.nvidia.com/blog/nvidia-ampere-architecture-in-depth/)
+- [NVIDIA Hopper Architecture In-Depth](https://developer.nvidia.com/blog/nvidia-hopper-architecture-in-depth/)
+- [NVIDIA Blackwell Architecture Technical Brief](https://dam-cdn.nvd.orangelogic.com/AssetLink/gl2l4l4812s5fw0p614s6i8bv6mi3vx5.pdf)
+
 ## Parse, Don't Validate
 
 We should critically evaluate whether `validate` or `verify` functions are actually needed. Most of the time, they aren't.
