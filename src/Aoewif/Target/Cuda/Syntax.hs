@@ -111,6 +111,8 @@ data Stmt
     = VarDecl Type Name (Maybe Expr)
     | SharedDecl Alignment Type Name Expr
     | SyncThreads
+    | NamedBarrierSync Expr Expr
+    | NamedBarrierArrive Expr Expr
     | ExprStmt Expr
     | If Expr [Stmt] (Maybe [Stmt])
     | For (Maybe Stmt) Expr (Maybe Expr) [Stmt]

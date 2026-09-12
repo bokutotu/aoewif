@@ -31,6 +31,8 @@ module Aoewif.Target.Cuda.DSL (
     if_,
     int,
     kernel,
+    namedBarrierArrive,
+    namedBarrierSync,
     not_,
     parameter,
     shared,
@@ -171,6 +173,14 @@ call_ function arguments =
 
 syncThreads :: Block ()
 syncThreads = emit SyncThreads
+
+namedBarrierSync :: Expr -> Expr -> Block ()
+namedBarrierSync barrierId threadCount =
+    emit (NamedBarrierSync barrierId threadCount)
+
+namedBarrierArrive :: Expr -> Expr -> Block ()
+namedBarrierArrive barrierId threadCount =
+    emit (NamedBarrierArrive barrierId threadCount)
 
 threadIdxX, threadIdxY, threadIdxZ :: Expr
 threadIdxX = ThreadIdx ThreadIdxX

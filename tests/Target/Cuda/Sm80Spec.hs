@@ -358,9 +358,9 @@ spec =
                                         waitGroup (Just 1)
                                     )
                                     (waitGroup (Just 0))
-                                syncThreads
+                                namedBarrierSync (int 1) (blockDimX .* blockDimY .* blockDimZ)
                                 computeStage kk
-                                syncThreads
+                                namedBarrierSync (int 1) (blockDimX .* blockDimY .* blockDimZ)
                         let storeTile r16 c8 = do
                                 let frag = accFrags !! (r16 * 4 + c8)
                                 forM_ [0 :: Integer .. 3] $ \j ->
@@ -483,7 +483,7 @@ spec =
                                    } else {
                                        asm volatile("cp.async.wait_group 0;");
                                    }
-                                   __syncthreads();
+                                   asm volatile("barrier.sync %0, %1;" :: "r"(1), "r"(((blockDim.x * blockDim.y) * blockDim.z)) : "memory");
                                    uint32_t a00;
                                    uint32_t a01;
                                    uint32_t a02;
@@ -588,7 +588,7 @@ spec =
                                        : "+f"(c70), "+f"(c71), "+f"(c72), "+f"(c73)
                                        : "r"(a11), "r"(a13), "r"(b31)
                                    );
-                                   __syncthreads();
+                                   asm volatile("barrier.sync %0, %1;" :: "r"(1), "r"(((blockDim.x * blockDim.y) * blockDim.z)) : "memory");
                                }
                                (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c00);
                                (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c01);

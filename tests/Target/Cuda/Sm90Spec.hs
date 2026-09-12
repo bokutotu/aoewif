@@ -105,10 +105,10 @@ spec =
                                 ]
                            ]
 
-        it "renders a 128-aligned 2x2-cluster GEMM smoke kernel" $ do
+        it "renders a 128-aligned 2x2-cluster BF16 GEMM smoke kernel" $ do
             let generated =
                     Codegen.generateWith
-                        (Codegen.Config [Codegen.CudaFp16Header])
+                        (Codegen.Config [Codegen.CudaBf16Header])
                         ( kernel "clustered_gemm" $ do
                             tensorMapA <- parameter USize "tensorMapA"
                             tensorMapB <- parameter USize "tensorMapB"
@@ -118,8 +118,9 @@ spec =
                             _ <- parameter USize "n"
                             _ <- parameter USize "k"
                             body $ do
-                                sharedA <- shared Align128 F16 "sharedA" (int 8192)
-                                sharedB <- shared Align128 F16 "sharedB" (int 8192)
+                                sharedA <- shared Align128 BF16 "sharedA" (int 8192)
+                                sharedB <- shared Align128 BF16 "sharedB" (int 8192)
+                                sharedFirstColumns <- shared Align16 BF16 "sharedFirstColumns" (int 1024)
                                 barrierA <- shared NaturalAlignment USize "barrierA" (int 1)
                                 barrierB <- shared NaturalAlignment USize "barrierB" (int 1)
                                 ctaX <- declare U32 "ctaX"
@@ -212,9 +213,8 @@ spec =
                                 accumulator <- declareWgmmaFragment F32 "d" 32
                                 zeroWgmmaFragment accumulator
                                 let mmaOperation =
-                                        WgmmaF16
+                                        WgmmaBF16
                                             WgmmaFloatN64
-                                            WgmmaAccumulatorF32
                                             accumulator
                                             ( WgmmaHalfSharedOperands
                                                 (WgmmaDescriptor descriptorA)
@@ -229,15 +229,52 @@ spec =
                                 wgmmaMmaAsync mmaOperation
                                 wgmmaCommitGroup
                                 wgmmaWaitGroup 0
+                                warpId <-
+                                    define
+                                        U32
+                                        "warpId"
+                                        ((threadIdxX .+ blockDimX .* (threadIdxY .+ blockDimY .* threadIdxZ)) ./ int 32)
+                                rowStride <- define U32 "rowStride" (int 16)
+                                packedTop <-
+                                    define
+                                        U32
+                                        "packedTop"
+                                        ( cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [var "d0"]])
+                                            .|. shiftL
+                                                (cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [var "d1"]]))
+                                                (int 16)
+                                        )
+                                packedBottom <-
+                                    define
+                                        U32
+                                        "packedBottom"
+                                        ( cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [var "d2"]])
+                                            .|. shiftL
+                                                (cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [var "d3"]]))
+                                                (int 16)
+                                        )
+                                stMatrix
+                                    (sharedFirstColumns .+ warpId .* int 16 .* rowStride)
+                                    rowStride
+                                    packedTop
+                                stMatrix
+                                    (sharedFirstColumns .+ (warpId .* int 16 .+ int 8) .* rowStride)
+                                    rowStride
+                                    packedBottom
+                                ifElse_
+                                    (warpId .== int 0)
+                                    (namedBarrierSync (int 1) (int 128))
+                                    (namedBarrierArrive (int 1) (int 128))
                         )
             generated
                 `shouldBe` """
                            #include <stdint.h>
-                           #include <cuda_fp16.h>
+                           #include <cuda_bf16.h>
 
                            extern "C" __global__ void clustered_gemm(size_t tensorMapA, size_t tensorMapB, size_t descriptorA, size_t descriptorB, size_t m, size_t n, size_t k) {
-                               __shared__ __align__(128) __half sharedA[8192];
-                               __shared__ __align__(128) __half sharedB[8192];
+                               __shared__ __align__(128) __nv_bfloat16 sharedA[8192];
+                               __shared__ __align__(128) __nv_bfloat16 sharedB[8192];
+                               __shared__ __align__(16) __nv_bfloat16 sharedFirstColumns[1024];
                                __shared__ size_t barrierA[1];
                                __shared__ size_t barrierB[1];
                                uint32_t ctaX;
@@ -370,12 +407,31 @@ spec =
                                    :
                                    : "memory"
                                );
-                               asm volatile("{ .reg .pred p; setp.ne.b32 p, %34, 0; wgmma.mma_async.sync.aligned.m64n64k16.f32.f16.f16 {%0, %1, %2, %3, %4, %5, %6, %7, %8, %9, %10, %11, %12, %13, %14, %15, %16, %17, %18, %19, %20, %21, %22, %23, %24, %25, %26, %27, %28, %29, %30, %31}, %32, %33, p, 1, 1, 0, 0; }"
+                               asm volatile("{ .reg .pred p; setp.ne.b32 p, %34, 0; wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 {%0, %1, %2, %3, %4, %5, %6, %7, %8, %9, %10, %11, %12, %13, %14, %15, %16, %17, %18, %19, %20, %21, %22, %23, %24, %25, %26, %27, %28, %29, %30, %31}, %32, %33, p, 1, 1, 0, 0; }"
                                    : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3), "+f"(d4), "+f"(d5), "+f"(d6), "+f"(d7), "+f"(d8), "+f"(d9), "+f"(d10), "+f"(d11), "+f"(d12), "+f"(d13), "+f"(d14), "+f"(d15), "+f"(d16), "+f"(d17), "+f"(d18), "+f"(d19), "+f"(d20), "+f"(d21), "+f"(d22), "+f"(d23), "+f"(d24), "+f"(d25), "+f"(d26), "+f"(d27), "+f"(d28), "+f"(d29), "+f"(d30), "+f"(d31)
                                    : "l"(descriptorA), "l"(descriptorB), "r"(1)
                                );
                                asm volatile("wgmma.commit_group.sync.aligned;" ::: "memory");
                                asm volatile("wgmma.wait_group.sync.aligned 0;" ::: "memory");
+                               uint32_t warpId = ((threadIdx.x + (blockDim.x * (threadIdx.y + (blockDim.y * threadIdx.z)))) / 32);
+                               uint32_t rowStride = 16;
+                               uint32_t packedTop = (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d0))) | (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d1))) << 16));
+                               uint32_t packedBottom = (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d2))) | (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d3))) << 16));
+                               // Derive the lane ID automatically from the block-local linear thread ID.
+                               asm volatile("stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};"
+                                   :: "r"(static_cast<uint32_t>(__cvta_generic_to_shared(((sharedFirstColumns + ((warpId * 16) * rowStride))) + ((threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z)) % 32 % 8) * (rowStride)))), "r"(packedTop)
+                                   : "memory"
+                               );
+                               // Derive the lane ID automatically from the block-local linear thread ID.
+                               asm volatile("stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};"
+                                   :: "r"(static_cast<uint32_t>(__cvta_generic_to_shared(((sharedFirstColumns + (((warpId * 16) + 8) * rowStride))) + ((threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z)) % 32 % 8) * (rowStride)))), "r"(packedBottom)
+                                   : "memory"
+                               );
+                               if ((warpId == 0)) {
+                                   asm volatile("barrier.sync %0, %1;" :: "r"(1), "r"(128) : "memory");
+                               } else {
+                                   asm volatile("barrier.arrive %0, %1;" :: "r"(1), "r"(128) : "memory");
+                               }
                            }
 
                            """

@@ -19,6 +19,7 @@ module Aoewif.Target.Cuda.Sm90.DSL (
     mapSharedCluster,
     readClusterSpecialRegister,
     setMaxNReg,
+    stMatrix,
     tmaTensorLoad,
     tmaTensorStore,
     wgmmaCommitGroup,
@@ -130,6 +131,9 @@ mapSharedCluster width destination source = emitSm90 . MapSharedCluster width de
 
 getCtaRank :: ClusterAddressWidth -> Expr -> Expr -> Block ()
 getCtaRank width destination = emitSm90 . GetCtaRank width destination
+
+stMatrix :: Expr -> Expr -> Expr -> Block ()
+stMatrix base rowStride source = emitSm90 (StMatrix base rowStride source)
 
 emitSm90 :: Sm90Op -> Block ()
 emitSm90 = emit . Op . TensorCoreOp

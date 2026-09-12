@@ -82,4 +82,9 @@ data Sm90Op
     | ReadClusterSpecialRegister Expr ClusterSpecialRegister
     | MapSharedCluster ClusterAddressWidth Expr Expr Expr
     | GetCtaRank ClusterAddressWidth Expr Expr
+    | StMatrix
+        { stMatrixBase      :: Expr
+        , stMatrixRowStride :: Expr
+        , stMatrixSource    :: Expr
+        }
     deriving stock (Eq, Show)

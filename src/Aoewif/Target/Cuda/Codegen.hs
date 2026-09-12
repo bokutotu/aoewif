@@ -88,6 +88,10 @@ renderStmt indentation stmt =
                 ++ "];\n"
         Syntax.SyncThreads ->
             indent indentation ++ "__syncthreads();\n"
+        Syntax.NamedBarrierSync barrierId threadCount ->
+            renderNamedBarrier indentation "sync" barrierId threadCount
+        Syntax.NamedBarrierArrive barrierId threadCount ->
+            renderNamedBarrier indentation "arrive" barrierId threadCount
         Syntax.ExprStmt expr ->
             indent indentation
                 ++ renderExpr expr
@@ -113,6 +117,17 @@ renderStmt indentation stmt =
                 ++ "}\n"
         Syntax.Op op ->
             renderOp indentation op
+
+renderNamedBarrier :: Int -> String -> Syntax.Expr -> Syntax.Expr -> String
+renderNamedBarrier indentation operation barrierId threadCount =
+    indent indentation
+        ++ "asm volatile(\"barrier."
+        ++ operation
+        ++ " %0, %1;\" :: \"r\"("
+        ++ renderExpr barrierId
+        ++ "), \"r\"("
+        ++ renderExpr threadCount
+        ++ ") : \"memory\");\n"
 
 renderInitializer :: Maybe Syntax.Expr -> String
 renderInitializer Nothing = ""

@@ -2,6 +2,7 @@
 
 module Aoewif.Target.Cuda.Sm90.Render () where
 
+import           Aoewif.Target.Cuda.Codegen              (indent, renderExpr)
 import           Aoewif.Target.Cuda.Sm90.Asm             (asmLine, exprOperand,
                                                           renderAsm)
 import           Aoewif.Target.Cuda.Sm90.Cluster.Render  (renderClusterBarrierArrive,
@@ -73,6 +74,25 @@ instance RenderOp Sm90Op where
                 renderMapSharedCluster indentation width destination source ctaRank
             GetCtaRank width destination address ->
                 renderGetCtaRank indentation width destination address
+            StMatrix base rowStride source ->
+                renderStMatrix indentation base rowStride source
+
+renderStMatrix :: Int -> Expr -> Expr -> Expr -> String
+renderStMatrix indentation base rowStride source =
+    unlines
+        [ indent indentation ++ "// Derive the lane ID automatically from the block-local linear thread ID."
+        , indent indentation ++ "asm volatile(\"stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};\""
+        , indent (indentation + 1)
+            ++ ":: \"r\"(static_cast<uint32_t>(__cvta_generic_to_shared(("
+            ++ renderExpr base
+            ++ ") + ((threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z)) % 32 % 8) * ("
+            ++ renderExpr rowStride
+            ++ ")))), \"r\"("
+            ++ renderExpr source
+            ++ ")"
+        , indent (indentation + 1) ++ ": \"memory\""
+        , indent indentation ++ ");"
+        ]
 
 renderElectSync :: Int -> ElectDestination -> Expr -> String
 renderElectSync indentation destination memberMask =
