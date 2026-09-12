@@ -1,3 +1,5 @@
+{-# LANGUAGE QuasiQuotes #-}
+
 module Aoewif.Target.Cuda.Sm90.Wgmma.Render (
     renderWgmmaMmaAsync,
     renderWgmmaFence,
@@ -5,11 +7,9 @@ module Aoewif.Target.Cuda.Sm90.Wgmma.Render (
     renderWgmmaWaitGroup,
 ) where
 
-import           Aoewif.Target.Cuda.Sm90.Asm               (AsmOperand, asmLine,
-                                                            exprOperand,
-                                                            placeholder,
-                                                            registerVector,
-                                                            renderAsm)
+import           Aoewif.Target.Cuda.Codegen                (indent, renderExpr)
+import           Aoewif.Target.Cuda.Sm90.Asm               (constraints,
+                                                            placeholders)
 import           Aoewif.Target.Cuda.Sm90.Wgmma.Instruction (WgmmaAccumulatorType (..),
                                                             WgmmaDescriptor (..),
                                                             WgmmaFloatN (..),
@@ -20,149 +20,127 @@ import           Aoewif.Target.Cuda.Sm90.Wgmma.Instruction (WgmmaAccumulatorType
                                                             WgmmaTranspose (..))
 import           Aoewif.Target.Cuda.Syntax                 (Expr)
 import           Data.List                                 (intercalate)
+import           Data.String.Interpolate                   (i)
 
 renderWgmmaCommitGroup :: Int -> String
 renderWgmmaCommitGroup indentation =
-    asmLine indentation "wgmma.commit_group.sync.aligned;" ["memory"]
+    [i|#{padding}asm volatile("wgmma.commit_group.sync.aligned;" ::: "memory");
+|]
+  where
+    padding = indent indentation
 
 renderWgmmaWaitGroup :: Int -> Int -> String
 renderWgmmaWaitGroup indentation groupCount =
-    asmLine
-        indentation
-        ( "wgmma.wait_group.sync.aligned "
-            ++ show groupCount
-            ++ ";"
-        )
-        ["memory"]
+    [i|#{padding}asm volatile("wgmma.wait_group.sync.aligned #{groupCount};" ::: "memory");
+|]
+  where
+    padding = indent indentation
 
 renderWgmmaFence :: Int -> WgmmaMma -> String
-renderWgmmaFence indentation operation =
-    renderAsm
-        indentation
-        "wgmma.fence.sync.aligned;"
-        (wgmmaFenceOperands operation)
-        []
-        ["memory"]
-
-wgmmaFenceOperands :: WgmmaMma -> [AsmOperand]
-wgmmaFenceOperands operation =
-    case operation of
-        WgmmaF16 _ accumulatorType accumulator operands _ _ _ ->
-            fenceFragmentOperands (accumulatorConstraint accumulatorType) accumulator ++ wgmmaHalfRegisterFenceOperands operands
-        WgmmaBF16 _ accumulator operands _ _ _ -> fenceFragmentOperands "+f" accumulator ++ wgmmaHalfRegisterFenceOperands operands
-
-fenceFragmentOperands :: String -> WgmmaFragment -> [AsmOperand]
-fenceFragmentOperands constraint = fmap (exprOperand constraint) . wgmmaFragmentRegisters
-
-wgmmaHalfRegisterFenceOperands :: WgmmaHalfOperands -> [AsmOperand]
-wgmmaHalfRegisterFenceOperands operands =
-    case operands of
-        WgmmaHalfSharedOperands{} -> []
-        WgmmaHalfRegisterOperands fragmentA _ _ -> fenceFragmentOperands "+r" fragmentA
+renderWgmmaFence indentation operation
+    | null fenceOperands =
+        [i|#{padding}asm volatile("wgmma.fence.sync.aligned;" ::: "memory");
+|]
+    | otherwise =
+        [i|#{padding}asm volatile("wgmma.fence.sync.aligned;"
+#{operandPadding}: #{fenceOperands}
+#{operandPadding}:
+#{operandPadding}: "memory"
+#{padding});
+|]
+  where
+    (outputConstraint, accumulator, operands) =
+        case operation of
+            WgmmaF16 _ accumulatorType fragment halfOperands _ _ _ ->
+                (accumulatorConstraint accumulatorType, fragment, halfOperands)
+            WgmmaBF16 _ fragment halfOperands _ _ _ ->
+                ("+f", fragment, halfOperands)
+    accumulatorOperands = constraints outputConstraint (wgmmaFragmentRegisters accumulator)
+    registerAOperands =
+        case operands of
+            WgmmaHalfSharedOperands{} -> ""
+            WgmmaHalfRegisterOperands fragmentA _ _ ->
+                constraints "+r" (wgmmaFragmentRegisters fragmentA)
+    fenceOperands = intercalate ", " (filter (not . null) [accumulatorOperands, registerAOperands])
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 renderWgmmaMmaAsync :: Int -> WgmmaMma -> String
 renderWgmmaMmaAsync indentation operation =
     case operation of
-        WgmmaF16
-            shapeN
-            accumulatorType
-            accumulator
-            operands
-            scaleD
-            scaleA
-            scaleB ->
-                renderWgmma
-                    indentation
-                    ( "m64n"
-                        ++ wgmmaFloatNTag shapeN
-                        ++ "k16."
-                        ++ accumulatorTypeTag accumulatorType
-                        ++ ".f16.f16"
-                    )
-                    (accumulatorConstraint accumulatorType)
-                    accumulator
-                    (wgmmaHalfOperandInfo operands)
-                    scaleD
-                    [wgmmaScaleTag scaleA, wgmmaScaleTag scaleB]
+        WgmmaF16 shapeN accumulatorType accumulator operands scaleD scaleA scaleB ->
+            renderWgmma
+                indentation
+                [i|m64n#{wgmmaFloatNTag shapeN}k16.#{accumulatorTypeTag accumulatorType}.f16.f16|]
+                (accumulatorConstraint accumulatorType)
+                accumulator
+                operands
+                scaleD
+                scaleA
+                scaleB
         WgmmaBF16 shapeN accumulator operands scaleD scaleA scaleB ->
             renderWgmma
                 indentation
-                ( "m64n"
-                    ++ wgmmaFloatNTag shapeN
-                    ++ "k16.f32.bf16.bf16"
-                )
+                [i|m64n#{wgmmaFloatNTag shapeN}k16.f32.bf16.bf16|]
                 "+f"
                 accumulator
-                (wgmmaHalfOperandInfo operands)
+                operands
                 scaleD
-                [wgmmaScaleTag scaleA, wgmmaScaleTag scaleB]
+                scaleA
+                scaleB
 
-data WgmmaOperandInfo = WgmmaOperandInfo
-    { wgmmaOperandText       :: Int -> String
-    , wgmmaOperandInputs     :: [AsmOperand]
-    , wgmmaOperandImmediates :: [String]
-    }
-
-renderWgmma :: Int -> String -> String -> WgmmaFragment -> WgmmaOperandInfo -> Expr -> [String] -> String
-renderWgmma indentation instructionTag outputConstraint accumulator operandInfo scaleD scaleImmediates =
-    renderAsm indentation instruction outputOperands inputOperands []
-  where
-    outputRegisters = wgmmaFragmentRegisters accumulator
-    outputCount = length outputRegisters
-    operandInputs = wgmmaOperandInputs operandInfo
-    scaleDIndex = outputCount + length operandInputs
-    outputOperands = fmap (exprOperand outputConstraint) outputRegisters
-    inputOperands = operandInputs ++ [exprOperand "r" scaleD]
-    immediateOperands = scaleImmediates ++ wgmmaOperandImmediates operandInfo
-    instruction =
-        "{ .reg .pred p; setp.ne.b32 p, %"
-            ++ show scaleDIndex
-            ++ ", 0; wgmma.mma_async.sync.aligned."
-            ++ instructionTag
-            ++ " "
-            ++ registerVector 0 outputCount
-            ++ ", "
-            ++ wgmmaOperandText operandInfo outputCount
-            ++ ", p, "
-            ++ intercalate ", " immediateOperands
-            ++ "; }"
-
-wgmmaHalfOperandInfo :: WgmmaHalfOperands -> WgmmaOperandInfo
-wgmmaHalfOperandInfo operands =
+renderWgmma :: Int -> String -> String -> WgmmaFragment -> WgmmaHalfOperands -> Expr -> WgmmaScale -> WgmmaScale -> String
+renderWgmma indentation instructionTag outputConstraint accumulator operands scaleD scaleA scaleB =
     case operands of
         WgmmaHalfSharedOperands
             (WgmmaDescriptor descriptorA)
             (WgmmaDescriptor descriptorB)
             transposeA
-            transposeB ->
-                WgmmaOperandInfo
-                    { wgmmaOperandText = \firstIndex ->
-                        placeholder firstIndex
-                            ++ ", "
-                            ++ placeholder (firstIndex + 1)
-                    , wgmmaOperandInputs =
-                        [exprOperand "l" descriptorA, exprOperand "l" descriptorB]
-                    , wgmmaOperandImmediates =
-                        [ wgmmaTransposeTag transposeA
-                        , wgmmaTransposeTag transposeB
-                        ]
-                    }
-        WgmmaHalfRegisterOperands
-            fragmentA
-            (WgmmaDescriptor descriptorB)
-            transposeB ->
-                WgmmaOperandInfo
-                    { wgmmaOperandText = \firstIndex ->
-                        registerVector firstIndex (length registersA)
-                            ++ ", "
-                            ++ placeholder (firstIndex + length registersA)
-                    , wgmmaOperandInputs =
-                        fmap (exprOperand "r") registersA
-                            ++ [exprOperand "l" descriptorB]
-                    , wgmmaOperandImmediates = [wgmmaTransposeTag transposeB]
-                    }
+            transposeB
+                | null outputRegisters ->
+                    [i|#{padding}asm volatile("{ .reg .pred p; setp.ne.b32 p, %#{scaleDIndex}, 0; wgmma.mma_async.sync.aligned.#{instructionTag} {#{dOperands}}, %#{descriptorAIndex}, %#{descriptorBIndex}, p, #{scaleATag}, #{scaleBTag}, #{wgmmaTransposeTag transposeA}, #{wgmmaTransposeTag transposeB}; }"
+#{operandPadding}:: "l"(#{renderExpr descriptorA}), "l"(#{renderExpr descriptorB}), "r"(#{renderExpr scaleD})
+#{padding});
+|]
+                | otherwise ->
+                    [i|#{padding}asm volatile("{ .reg .pred p; setp.ne.b32 p, %#{scaleDIndex}, 0; wgmma.mma_async.sync.aligned.#{instructionTag} {#{dOperands}}, %#{descriptorAIndex}, %#{descriptorBIndex}, p, #{scaleATag}, #{scaleBTag}, #{wgmmaTransposeTag transposeA}, #{wgmmaTransposeTag transposeB}; }"
+#{operandPadding}: #{constraints outputConstraint outputRegisters}
+#{operandPadding}: "l"(#{renderExpr descriptorA}), "l"(#{renderExpr descriptorB}), "r"(#{renderExpr scaleD})
+#{padding});
+|]
               where
-                registersA = wgmmaFragmentRegisters fragmentA
+                descriptorAIndex = outputCount
+                descriptorBIndex = outputCount + 1
+                scaleDIndex = outputCount + 2
+        WgmmaHalfRegisterOperands
+            (WgmmaFragment registersA)
+            (WgmmaDescriptor descriptorB)
+            transposeB
+                | null outputRegisters ->
+                    [i|#{padding}asm volatile("{ .reg .pred p; setp.ne.b32 p, %#{scaleDIndex}, 0; wgmma.mma_async.sync.aligned.#{instructionTag} {#{dOperands}}, {#{aOperands}}, %#{descriptorBIndex}, p, #{scaleATag}, #{scaleBTag}, #{wgmmaTransposeTag transposeB}; }"
+#{operandPadding}:: #{constraints "r" registersA}#{registerASeparator}"l"(#{renderExpr descriptorB}), "r"(#{renderExpr scaleD})
+#{padding});
+|]
+                | otherwise ->
+                    [i|#{padding}asm volatile("{ .reg .pred p; setp.ne.b32 p, %#{scaleDIndex}, 0; wgmma.mma_async.sync.aligned.#{instructionTag} {#{dOperands}}, {#{aOperands}}, %#{descriptorBIndex}, p, #{scaleATag}, #{scaleBTag}, #{wgmmaTransposeTag transposeB}; }"
+#{operandPadding}: #{constraints outputConstraint outputRegisters}
+#{operandPadding}: #{constraints "r" registersA}#{registerASeparator}"l"(#{renderExpr descriptorB}), "r"(#{renderExpr scaleD})
+#{padding});
+|]
+              where
+                aCount = length registersA
+                aOperands = placeholders outputCount aCount
+                descriptorBIndex = outputCount + aCount
+                scaleDIndex = descriptorBIndex + 1
+                registerASeparator = if null registersA then "" else ", "
+  where
+    outputRegisters = wgmmaFragmentRegisters accumulator
+    outputCount = length outputRegisters
+    dOperands = placeholders 0 outputCount
+    scaleATag = wgmmaScaleTag scaleA
+    scaleBTag = wgmmaScaleTag scaleB
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 accumulatorTypeTag :: WgmmaAccumulatorType -> String
 accumulatorTypeTag WgmmaAccumulatorF16 = "f16"

@@ -1,15 +1,17 @@
+{-# LANGUAGE QuasiQuotes #-}
+
 module Aoewif.Target.Cuda.Sm90.Tma.Render (
     renderTmaTensor,
     renderBulkCommitGroup,
     renderBulkWaitGroup,
 ) where
 
-import           Aoewif.Target.Cuda.Sm90.Asm                  (asmLine,
-                                                               exprOperand,
-                                                               localSharedOperand,
+import           Aoewif.Target.Cuda.Codegen                   (indent,
+                                                               renderExpr)
+import           Aoewif.Target.Cuda.Sm90.Asm                  (constraints,
                                                                placeholders,
-                                                               renderAsm)
-import           Aoewif.Target.Cuda.Sm90.Cluster.Render       (clusterAddressOperand)
+                                                               sharedAddress)
+import           Aoewif.Target.Cuda.Sm90.Cluster.Render       (clusterAddressConstraint)
 import           Aoewif.Target.Cuda.Sm90.MBarrier.Instruction (MBarrier (..))
 import           Aoewif.Target.Cuda.Sm90.Tma.Instruction      (BulkWaitMode (..),
                                                                TmaCachePolicy (..),
@@ -18,22 +20,26 @@ import           Aoewif.Target.Cuda.Sm90.Tma.Instruction      (BulkWaitMode (..)
                                                                TmaTensorMap (..),
                                                                TmaTensorOp (..))
 import           Aoewif.Target.Cuda.Syntax                    (Expr)
+import           Data.String.Interpolate                      (i)
 
 renderBulkCommitGroup :: Int -> String
 renderBulkCommitGroup indentation =
-    asmLine indentation "cp.async.bulk.commit_group;" ["memory"]
+    [i|#{padding}asm volatile("cp.async.bulk.commit_group;" ::: "memory");
+|]
+  where
+    padding = indent indentation
 
 renderBulkWaitGroup :: Int -> BulkWaitMode -> Int -> String
 renderBulkWaitGroup indentation mode groupCount =
-    asmLine
-        indentation
-        ( "cp.async.bulk.wait_group"
-            ++ bulkWaitModeTag mode
-            ++ " "
-            ++ show groupCount
-            ++ ";"
-        )
-        ["memory"]
+    case mode of
+        BulkWaitComplete ->
+            [i|#{padding}asm volatile("cp.async.bulk.wait_group #{groupCount};" ::: "memory");
+|]
+        BulkWaitRead ->
+            [i|#{padding}asm volatile("cp.async.bulk.wait_group.read #{groupCount};" ::: "memory");
+|]
+  where
+    padding = indent indentation
 
 renderTmaTensor :: Int -> TmaTensorOp -> String
 renderTmaTensor indentation operation =
@@ -56,90 +62,75 @@ renderTmaTensor indentation operation =
 
 renderTmaTensorLoad :: Int -> TmaLoadDestination -> TmaTensorMap -> TmaCoordinates -> MBarrier -> Maybe TmaCachePolicy -> String
 renderTmaTensorLoad indentation destination (TmaTensorMap tensorMap) coordinates (MBarrier barrier) cachePolicy =
-    renderAsm indentation instruction [] inputOperands ["memory"]
+    case (destination, cachePolicy) of
+        (TmaCtaShared destinationAddress, Nothing) ->
+            [i|#{padding}asm volatile("cp.async.bulk.tensor.#{dimension}d.shared::cta.global.mbarrier::complete_tx::bytes [%0], [%1, {#{coordinatePlaceholders}}], [%#{barrierIndex}];"
+#{operandPadding}:: "l"(#{sharedAddress destinationAddress}), "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "l"(#{sharedAddress barrier})
+#{operandPadding}: "memory"
+#{padding});
+|]
+        (TmaCtaShared destinationAddress, Just (TmaCachePolicy policy)) ->
+            [i|#{padding}asm volatile("cp.async.bulk.tensor.#{dimension}d.shared::cta.global.mbarrier::complete_tx::bytes.L2::cache_hint [%0], [%1, {#{coordinatePlaceholders}}], [%#{barrierIndex}], %#{cacheIndex};"
+#{operandPadding}:: "l"(#{sharedAddress destinationAddress}), "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "l"(#{sharedAddress barrier}), "l"(#{renderExpr policy})
+#{operandPadding}: "memory"
+#{padding});
+|]
+        (TmaClusterShared width destinationAddress, Nothing) ->
+            [i|#{padding}asm volatile("cp.async.bulk.tensor.#{dimension}d.shared::cluster.global.mbarrier::complete_tx::bytes [%0], [%1, {#{coordinatePlaceholders}}], [%#{barrierIndex}];"
+#{operandPadding}:: "#{clusterAddressConstraint width}"(#{renderExpr destinationAddress}), "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "#{clusterAddressConstraint width}"(#{renderExpr barrier})
+#{operandPadding}: "memory"
+#{padding});
+|]
+        (TmaClusterShared width destinationAddress, Just (TmaCachePolicy policy)) ->
+            [i|#{padding}asm volatile("cp.async.bulk.tensor.#{dimension}d.shared::cluster.global.mbarrier::complete_tx::bytes.L2::cache_hint [%0], [%1, {#{coordinatePlaceholders}}], [%#{barrierIndex}], %#{cacheIndex};"
+#{operandPadding}:: "#{clusterAddressConstraint width}"(#{renderExpr destinationAddress}), "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "#{clusterAddressConstraint width}"(#{renderExpr barrier}), "l"(#{renderExpr policy})
+#{operandPadding}: "memory"
+#{padding});
+|]
+        (TmaMulticastClusterShared destinationAddress ctaMask, Nothing) ->
+            [i|#{padding}asm volatile("{ .reg .b16 cta_mask; .reg .b16 unused; mov.b32 {cta_mask, unused}, %#{maskIndex}; cp.async.bulk.tensor.#{dimension}d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster [%0], [%1, {#{coordinatePlaceholders}}], [%#{barrierIndex}], cta_mask; }"
+#{operandPadding}:: "l"(#{sharedAddress destinationAddress}), "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "l"(#{sharedAddress barrier}), "r"(#{renderExpr ctaMask})
+#{operandPadding}: "memory"
+#{padding});
+|]
+        (TmaMulticastClusterShared destinationAddress ctaMask, Just (TmaCachePolicy policy)) ->
+            [i|#{padding}asm volatile("{ .reg .b16 cta_mask; .reg .b16 unused; mov.b32 {cta_mask, unused}, %#{maskIndex}; cp.async.bulk.tensor.#{dimension}d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster.L2::cache_hint [%0], [%1, {#{coordinatePlaceholders}}], [%#{barrierIndex}], cta_mask, %#{multicastCacheIndex}; }"
+#{operandPadding}:: "l"(#{sharedAddress destinationAddress}), "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "l"(#{sharedAddress barrier}), "r"(#{renderExpr ctaMask}), "l"(#{renderExpr policy})
+#{operandPadding}: "memory"
+#{padding});
+|]
   where
     (dimension, coordinateExpressions) = tmaCoordinateInfo coordinates
-    (destinationTag, destinationOperand, barrierOperand, multicastMask) =
-        case destination of
-            TmaCtaShared destinationAddress ->
-                ( ".shared::cta"
-                , localSharedOperand destinationAddress
-                , localSharedOperand barrier
-                , Nothing
-                )
-            TmaClusterShared width destinationAddress ->
-                ( ".shared::cluster"
-                , clusterAddressOperand width destinationAddress
-                , clusterAddressOperand width barrier
-                , Nothing
-                )
-            TmaMulticastClusterShared destinationAddress ctaMask ->
-                ( ".shared::cluster"
-                , localSharedOperand destinationAddress
-                , localSharedOperand barrier
-                , Just ctaMask
-                )
-    coordinateOperands = fmap (exprOperand "r") coordinateExpressions
-    barrierIndex = 2 + length coordinateOperands
+    coordinatePlaceholders = placeholders 2 dimension
+    barrierIndex = 2 + dimension
     maskIndex = barrierIndex + 1
-    cacheIndex = maskIndex + maybe 0 (const 1) multicastMask
-    inputOperands =
-        [destinationOperand, exprOperand "l" tensorMap]
-            ++ coordinateOperands
-            ++ [barrierOperand]
-            ++ maybe [] (pure . exprOperand "r") multicastMask
-            ++ maybe [] (\(TmaCachePolicy policy) -> [exprOperand "l" policy]) cachePolicy
-    tensorInstruction =
-        "cp.async.bulk.tensor."
-            ++ show dimension
-            ++ "d"
-            ++ destinationTag
-            ++ ".global.mbarrier::complete_tx::bytes"
-            ++ maybe "" (const ".multicast::cluster") multicastMask
-            ++ maybe "" (const ".L2::cache_hint") cachePolicy
-            ++ " [%0], [%1, {"
-            ++ placeholders 2 (length coordinateOperands)
-            ++ "}], [%"
-            ++ show barrierIndex
-            ++ "]"
-            ++ maybe "" (const ", cta_mask") multicastMask
-            ++ maybe "" (const (", %" ++ show cacheIndex)) cachePolicy
-            ++ ";"
-    instruction =
-        case multicastMask of
-            Nothing -> tensorInstruction
-            Just _ ->
-                "{ .reg .b16 cta_mask; .reg .b16 unused; mov.b32 {cta_mask, unused}, %"
-                    ++ show maskIndex
-                    ++ "; "
-                    ++ tensorInstruction
-                    ++ " }"
+    cacheIndex = barrierIndex + 1
+    multicastCacheIndex = maskIndex + 1
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 renderTmaTensorStore :: Int -> TmaTensorMap -> TmaCoordinates -> Expr -> Maybe TmaCachePolicy -> String
 renderTmaTensorStore indentation (TmaTensorMap tensorMap) coordinates source cachePolicy =
-    renderAsm indentation instruction [] inputOperands ["memory"]
+    case cachePolicy of
+        Nothing ->
+            [i|#{padding}asm volatile("cp.async.bulk.tensor.#{dimension}d.global.shared::cta.bulk_group [%0, {#{coordinatePlaceholders}}], [%#{sourceIndex}];"
+#{operandPadding}:: "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "l"(#{sharedAddress source})
+#{operandPadding}: "memory"
+#{padding});
+|]
+        Just (TmaCachePolicy policy) ->
+            [i|#{padding}asm volatile("cp.async.bulk.tensor.#{dimension}d.global.shared::cta.bulk_group.L2::cache_hint [%0, {#{coordinatePlaceholders}}], [%#{sourceIndex}], %#{cacheIndex};"
+#{operandPadding}:: "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "l"(#{sharedAddress source}), "l"(#{renderExpr policy})
+#{operandPadding}: "memory"
+#{padding});
+|]
   where
     (dimension, coordinateExpressions) = tmaCoordinateInfo coordinates
-    coordinateOperands = fmap (exprOperand "r") coordinateExpressions
-    sourceIndex = 1 + length coordinateOperands
+    coordinatePlaceholders = placeholders 1 dimension
+    sourceIndex = 1 + dimension
     cacheIndex = sourceIndex + 1
-    inputOperands =
-        [exprOperand "l" tensorMap]
-            ++ coordinateOperands
-            ++ [localSharedOperand source]
-            ++ maybe [] (\(TmaCachePolicy policy) -> [exprOperand "l" policy]) cachePolicy
-    instruction =
-        "cp.async.bulk.tensor."
-            ++ show dimension
-            ++ "d.global.shared::cta.bulk_group"
-            ++ maybe "" (const ".L2::cache_hint") cachePolicy
-            ++ " [%0, {"
-            ++ placeholders 1 (length coordinateOperands)
-            ++ "}], [%"
-            ++ show sourceIndex
-            ++ "]"
-            ++ maybe "" (const (", %" ++ show cacheIndex)) cachePolicy
-            ++ ";"
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 tmaCoordinateInfo :: TmaCoordinates -> (Int, [Expr])
 tmaCoordinateInfo coordinates =
@@ -154,7 +145,3 @@ tmaCoordinateInfo coordinates =
             (4, [coordinate0, coordinate1, coordinate2, coordinate3])
         TmaCoordinates5D coordinate0 coordinate1 coordinate2 coordinate3 coordinate4 ->
             (5, [coordinate0, coordinate1, coordinate2, coordinate3, coordinate4])
-
-bulkWaitModeTag :: BulkWaitMode -> String
-bulkWaitModeTag BulkWaitComplete = ""
-bulkWaitModeTag BulkWaitRead     = ".read"

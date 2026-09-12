@@ -1,10 +1,9 @@
+{-# LANGUAGE QuasiQuotes #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Aoewif.Target.Cuda.Sm90.Render () where
 
 import           Aoewif.Target.Cuda.Codegen              (indent, renderExpr)
-import           Aoewif.Target.Cuda.Sm90.Asm             (asmLine, exprOperand,
-                                                          renderAsm)
 import           Aoewif.Target.Cuda.Sm90.Cluster.Render  (renderClusterBarrierArrive,
                                                           renderClusterBarrierWait,
                                                           renderClusterSpecialRegister,
@@ -25,6 +24,7 @@ import           Aoewif.Target.Cuda.Sm90.Wgmma.Render    (renderWgmmaCommitGroup
                                                           renderWgmmaWaitGroup)
 import           Aoewif.Target.Cuda.Syntax               (Expr)
 import           Aoewif.Target.Cuda.TensorCoreOp         (RenderOp (..))
+import           Data.String.Interpolate                 (i)
 
 instance RenderOp Sm90Op where
     renderOp indentation operation =
@@ -45,25 +45,22 @@ instance RenderOp Sm90Op where
                 renderBulkWaitGroup indentation mode groupCount
             MBarrierInstruction barrierOperation ->
                 renderMBarrier indentation barrierOperation
-            FenceProxyAsync scope ->
-                asmLine
-                    indentation
-                    ("fence.proxy.async" ++ sharedScopeTag scope ++ ";")
-                    ["memory"]
+            FenceProxyAsync SharedCta ->
+                [i|#{padding}asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
+|]
+            FenceProxyAsync SharedCluster ->
+                [i|#{padding}asm volatile("fence.proxy.async.shared::cluster;" ::: "memory");
+|]
             FenceMBarrierInit ->
                 renderFenceMBarrierInit indentation
             ElectSync destination memberMask ->
                 renderElectSync indentation destination memberMask
-            SetMaxNReg adjustment registerCount ->
-                asmLine
-                    indentation
-                    ( "setmaxnreg."
-                        ++ registerAdjustmentTag adjustment
-                        ++ ".sync.aligned.u32 "
-                        ++ show registerCount
-                        ++ ";"
-                    )
-                    ["memory"]
+            SetMaxNReg IncreaseRegisters registerCount ->
+                [i|#{padding}asm volatile("setmaxnreg.inc.sync.aligned.u32 #{registerCount};" ::: "memory");
+|]
+            SetMaxNReg DecreaseRegisters registerCount ->
+                [i|#{padding}asm volatile("setmaxnreg.dec.sync.aligned.u32 #{registerCount};" ::: "memory");
+|]
             ClusterBarrierArrive arrival ->
                 renderClusterBarrierArrive indentation arrival
             ClusterBarrierWait ->
@@ -76,46 +73,36 @@ instance RenderOp Sm90Op where
                 renderGetCtaRank indentation width destination address
             StMatrix base rowStride source ->
                 renderStMatrix indentation base rowStride source
+      where
+        padding = indent indentation
 
 renderStMatrix :: Int -> Expr -> Expr -> Expr -> String
 renderStMatrix indentation base rowStride source =
-    unlines
-        [ indent indentation ++ "// Derive the lane ID automatically from the block-local linear thread ID."
-        , indent indentation ++ "asm volatile(\"stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};\""
-        , indent (indentation + 1)
-            ++ ":: \"r\"(static_cast<uint32_t>(__cvta_generic_to_shared(("
-            ++ renderExpr base
-            ++ ") + ((threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z)) % 32 % 8) * ("
-            ++ renderExpr rowStride
-            ++ ")))), \"r\"("
-            ++ renderExpr source
-            ++ ")"
-        , indent (indentation + 1) ++ ": \"memory\""
-        , indent indentation ++ ");"
-        ]
+    [i|#{padding}// Derive the lane ID automatically from the block-local linear thread ID.
+#{padding}asm volatile("stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};"
+#{operandPadding}:: "r"(static_cast<uint32_t>(__cvta_generic_to_shared((#{renderExpr base}) + ((threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z)) % 32 % 8) * (#{renderExpr rowStride})))), "r"(#{renderExpr source})
+#{operandPadding}: "memory"
+#{padding});
+|]
+  where
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 renderElectSync :: Int -> ElectDestination -> Expr -> String
 renderElectSync indentation destination memberMask =
     case destination of
         ElectPredicate predicate ->
-            renderAsm
-                indentation
-                "{ .reg .pred p; elect.sync _|p, %1; selp.b32 %0, 1, 0, p; }"
-                [exprOperand "=r" predicate]
-                [exprOperand "r" memberMask]
-                []
+            [i|#{padding}asm volatile("{ .reg .pred p; elect.sync _|p, %1; selp.b32 %0, 1, 0, p; }"
+#{operandPadding}: "=r"(#{renderExpr predicate})
+#{operandPadding}: "r"(#{renderExpr memberMask})
+#{padding});
+|]
         ElectLaneAndPredicate lane predicate ->
-            renderAsm
-                indentation
-                "{ .reg .pred p; elect.sync %0|p, %2; selp.b32 %1, 1, 0, p; }"
-                [exprOperand "=r" lane, exprOperand "=r" predicate]
-                [exprOperand "r" memberMask]
-                []
-
-sharedScopeTag :: SharedScope -> String
-sharedScopeTag SharedCta     = ".shared::cta"
-sharedScopeTag SharedCluster = ".shared::cluster"
-
-registerAdjustmentTag :: RegisterAdjustment -> String
-registerAdjustmentTag IncreaseRegisters = "inc"
-registerAdjustmentTag DecreaseRegisters = "dec"
+            [i|#{padding}asm volatile("{ .reg .pred p; elect.sync %0|p, %2; selp.b32 %1, 1, 0, p; }"
+#{operandPadding}: "=r"(#{renderExpr lane}), "=r"(#{renderExpr predicate})
+#{operandPadding}: "r"(#{renderExpr memberMask})
+#{padding});
+|]
+  where
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)

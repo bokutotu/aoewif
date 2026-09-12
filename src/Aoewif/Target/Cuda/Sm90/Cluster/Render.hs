@@ -1,5 +1,7 @@
+{-# LANGUAGE QuasiQuotes #-}
+
 module Aoewif.Target.Cuda.Sm90.Cluster.Render (
-    clusterAddressOperand,
+    clusterAddressConstraint,
     renderClusterBarrierArrive,
     renderClusterBarrierWait,
     renderClusterSpecialRegister,
@@ -7,53 +9,50 @@ module Aoewif.Target.Cuda.Sm90.Cluster.Render (
     renderMapSharedCluster,
 ) where
 
-import           Aoewif.Target.Cuda.Sm90.Asm                 (AsmOperand,
-                                                              asmLine,
-                                                              exprOperand,
-                                                              renderAsm)
+import           Aoewif.Target.Cuda.Codegen                  (indent,
+                                                              renderExpr)
 import           Aoewif.Target.Cuda.Sm90.Cluster.Instruction (ClusterAddressWidth (..),
                                                               ClusterBarrierArrival (..),
                                                               ClusterDimension (..),
                                                               ClusterSpecialRegister (..))
 import           Aoewif.Target.Cuda.Syntax                   (Expr)
+import           Data.String.Interpolate                     (i)
 
 renderClusterBarrierArrive :: Int -> ClusterBarrierArrival -> String
 renderClusterBarrierArrive indentation arrival =
-    asmLine
-        indentation
-        ( "barrier.cluster.arrive."
-            ++ clusterBarrierArrivalTag arrival
-            ++ ".aligned;"
-        )
-        ["memory"]
+    case arrival of
+        ClusterBarrierRelease ->
+            [i|#{padding}asm volatile("barrier.cluster.arrive.release.aligned;" ::: "memory");
+|]
+        ClusterBarrierRelaxed ->
+            [i|#{padding}asm volatile("barrier.cluster.arrive.relaxed.aligned;" ::: "memory");
+|]
+  where
+    padding = indent indentation
 
 renderClusterBarrierWait :: Int -> String
 renderClusterBarrierWait indentation =
-    asmLine
-        indentation
-        "barrier.cluster.wait.acquire.aligned;"
-        ["memory"]
+    [i|#{padding}asm volatile("barrier.cluster.wait.acquire.aligned;" ::: "memory");
+|]
+  where
+    padding = indent indentation
 
 renderClusterSpecialRegister :: Int -> Expr -> ClusterSpecialRegister -> String
 renderClusterSpecialRegister indentation destination specialRegister =
     case clusterSpecialRegisterInfo specialRegister of
         ClusterU32SpecialRegister registerName ->
-            renderAsm
-                indentation
-                ("mov.u32 %0, %%" ++ registerName ++ ";")
-                [exprOperand "=r" destination]
-                []
-                []
+            [i|#{padding}asm volatile("mov.u32 %0, %%#{registerName};"
+#{operandPadding}: "=r"(#{renderExpr destination})
+#{padding});
+|]
         ClusterPredicateSpecialRegister registerName ->
-            renderAsm
-                indentation
-                ( "{ .reg .pred p; mov.pred p, %%"
-                    ++ registerName
-                    ++ "; selp.b32 %0, 1, 0, p; }"
-                )
-                [exprOperand "=r" destination]
-                []
-                []
+            [i|#{padding}asm volatile("{ .reg .pred p; mov.pred p, %%#{registerName}; selp.b32 %0, 1, 0, p; }"
+#{operandPadding}: "=r"(#{renderExpr destination})
+#{padding});
+|]
+  where
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 data ClusterSpecialRegisterInfo
     = ClusterU32SpecialRegister String
@@ -63,13 +62,13 @@ clusterSpecialRegisterInfo :: ClusterSpecialRegister -> ClusterSpecialRegisterIn
 clusterSpecialRegisterInfo specialRegister =
     case specialRegister of
         ClusterId dimension ->
-            ClusterU32SpecialRegister ("clusterid." ++ clusterDimensionTag dimension)
+            ClusterU32SpecialRegister [i|clusterid.#{clusterDimensionTag dimension}|]
         NClusterId dimension ->
-            ClusterU32SpecialRegister ("nclusterid." ++ clusterDimensionTag dimension)
+            ClusterU32SpecialRegister [i|nclusterid.#{clusterDimensionTag dimension}|]
         ClusterCtaId dimension ->
-            ClusterU32SpecialRegister ("cluster_ctaid." ++ clusterDimensionTag dimension)
+            ClusterU32SpecialRegister [i|cluster_ctaid.#{clusterDimensionTag dimension}|]
         ClusterNCtaId dimension ->
-            ClusterU32SpecialRegister ("cluster_nctaid." ++ clusterDimensionTag dimension)
+            ClusterU32SpecialRegister [i|cluster_nctaid.#{clusterDimensionTag dimension}|]
         ClusterCtaRank ->
             ClusterU32SpecialRegister "cluster_ctarank"
         ClusterNCtaRank ->
@@ -79,38 +78,36 @@ clusterSpecialRegisterInfo specialRegister =
 
 renderMapSharedCluster :: Int -> ClusterAddressWidth -> Expr -> Expr -> Expr -> String
 renderMapSharedCluster indentation width destination source ctaRank =
-    renderAsm
-        indentation
-        ("mapa.shared::cluster." ++ widthTag ++ " %0, %1, %2;")
-        [exprOperand outputConstraint destination]
-        [exprOperand inputConstraint source, exprOperand "r" ctaRank]
-        []
+    [i|#{padding}asm volatile("mapa.shared::cluster.#{widthTag} %0, %1, %2;"
+#{operandPadding}: "#{outputConstraint}"(#{renderExpr destination})
+#{operandPadding}: "#{inputConstraint}"(#{renderExpr source}), "r"(#{renderExpr ctaRank})
+#{padding});
+|]
   where
     (widthTag, outputConstraint, inputConstraint) = clusterAddressWidthInfo width
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 renderGetCtaRank :: Int -> ClusterAddressWidth -> Expr -> Expr -> String
 renderGetCtaRank indentation width destination address =
-    renderAsm
-        indentation
-        ("getctarank.shared::cluster." ++ widthTag ++ " %0, %1;")
-        [exprOperand "=r" destination]
-        [exprOperand inputConstraint address]
-        []
+    [i|#{padding}asm volatile("getctarank.shared::cluster.#{widthTag} %0, %1;"
+#{operandPadding}: "=r"(#{renderExpr destination})
+#{operandPadding}: "#{inputConstraint}"(#{renderExpr address})
+#{padding});
+|]
   where
     (widthTag, _, inputConstraint) = clusterAddressWidthInfo width
-
-clusterBarrierArrivalTag :: ClusterBarrierArrival -> String
-clusterBarrierArrivalTag ClusterBarrierRelease = "release"
-clusterBarrierArrivalTag ClusterBarrierRelaxed = "relaxed"
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 clusterDimensionTag :: ClusterDimension -> String
 clusterDimensionTag ClusterX = "x"
 clusterDimensionTag ClusterY = "y"
 clusterDimensionTag ClusterZ = "z"
 
-clusterAddressOperand :: ClusterAddressWidth -> Expr -> AsmOperand
-clusterAddressOperand width =
-    exprOperand inputConstraint
+clusterAddressConstraint :: ClusterAddressWidth -> String
+clusterAddressConstraint width =
+    inputConstraint
   where
     (_, _, inputConstraint) = clusterAddressWidthInfo width
 
