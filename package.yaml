@@ -29,6 +29,16 @@ library:
     - Aoewif.Target.Cuda.DSL
     - Aoewif.Target.Cuda.Syntax
     - Aoewif.Target.Cuda.TensorCoreOp
+  other-modules:
+    - Aoewif.Target.Cuda.Sm90.Asm
+    - Aoewif.Target.Cuda.Sm90.Cluster.Instruction
+    - Aoewif.Target.Cuda.Sm90.Cluster.Render
+    - Aoewif.Target.Cuda.Sm90.MBarrier.Instruction
+    - Aoewif.Target.Cuda.Sm90.MBarrier.Render
+    - Aoewif.Target.Cuda.Sm90.Tma.Instruction
+    - Aoewif.Target.Cuda.Sm90.Tma.Render
+    - Aoewif.Target.Cuda.Sm90.Wgmma.Instruction
+    - Aoewif.Target.Cuda.Sm90.Wgmma.Render
 
 tests:
   aoewif-test:
