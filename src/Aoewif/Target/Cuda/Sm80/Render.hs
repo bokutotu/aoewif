@@ -1,3 +1,4 @@
+{-# LANGUAGE QuasiQuotes #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Aoewif.Target.Cuda.Sm80.Render () where
@@ -12,6 +13,7 @@ import           Aoewif.Target.Cuda.Sm80.Instruction (CpAsyncShape (..),
 import           Aoewif.Target.Cuda.Syntax           (Expr)
 import           Aoewif.Target.Cuda.TensorCoreOp     (RenderOp (..))
 import           Data.List                           (intercalate)
+import           Data.String.Interpolate             (i)
 
 instance RenderOp Sm80Op where
     renderOp indentation op =
@@ -25,9 +27,16 @@ instance RenderOp Sm80Op where
             CpAsync shape sourceSize destination source ->
                 renderCpAsync indentation shape sourceSize destination source
             CommitGroup ->
-                asmLine indentation "cp.async.commit_group;"
-            WaitGroup groups ->
-                asmLine indentation (waitGroupInstruction groups)
+                [i|#{padding}asm volatile("cp.async.commit_group;");
+|]
+            WaitGroup Nothing ->
+                [i|#{padding}asm volatile("cp.async.wait_all;");
+|]
+            WaitGroup (Just groups) ->
+                [i|#{padding}asm volatile("cp.async.wait_group #{groups};");
+|]
+      where
+        padding = indent indentation
 
 data MmaInfo = MmaInfo
     { mmaInfoAsmTag :: String
@@ -45,12 +54,11 @@ mmaInfo M16N8K16BF16 = MmaInfo "m16n8k16.row.col.f32.bf16.bf16.f32" 4 2 4
 
 renderMma :: Int -> MmaShape -> [Expr] -> [Expr] -> [Expr] -> String
 renderMma indentation shape aRegisters bRegisters dRegisters =
-    unlines
-        [ asmOpen indentation ("mma.sync.aligned." ++ asmTag ++ " " ++ operands ++ ";")
-        , indent (indentation + 1) ++ ": " ++ constraints "+f" dRegisters
-        , indent (indentation + 1) ++ ": " ++ constraints "r" (aRegisters ++ bRegisters)
-        , indent indentation ++ ");"
-        ]
+    [i|#{padding}asm volatile("mma.sync.aligned.#{asmTag} {#{dOperands}}, {#{aOperands}}, {#{bOperands}}, {#{dOperands}};"
+#{operandPadding}: #{constraints "+f" dRegisters}
+#{operandPadding}: #{constraints "r" (aRegisters ++ bRegisters)}
+#{padding});
+|]
   where
     MmaInfo
         { mmaInfoAsmTag = asmTag
@@ -58,82 +66,54 @@ renderMma indentation shape aRegisters bRegisters dRegisters =
         , mmaInfoBRegs = bCount
         , mmaInfoDRegs = dCount
         } = mmaInfo shape
-    operands =
-        "{"
-            ++ placeholders 0 dCount
-            ++ "}, "
-            ++ "{"
-            ++ placeholders dCount aCount
-            ++ "}, "
-            ++ "{"
-            ++ placeholders (dCount + aCount) bCount
-            ++ "}, "
-            ++ "{"
-            ++ placeholders 0 dCount
-            ++ "}"
+    dOperands = placeholders 0 dCount
+    aOperands = placeholders dCount aCount
+    bOperands = placeholders (dCount + aCount) bCount
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 renderLdMatrix :: Int -> LdMatrixMode -> LdMatrixForm -> [Expr] -> Expr -> String
 renderLdMatrix indentation mode form registers address =
-    unlines
-        [ asmOpen
-            indentation
-            ( "ldmatrix.sync.aligned.m8n8."
-                ++ formTag
-                ++ ldMatrixModeTag mode
-                ++ ".shared.b16 {"
-                ++ placeholders 0 registerCount
-                ++ "}, ["
-                ++ "%"
-                ++ show registerCount
-                ++ "];"
-            )
-        , indent (indentation + 1) ++ ": " ++ constraints "=r" registers
-        , indent (indentation + 1) ++ ": \"l\"(" ++ sharedAddress address ++ ")"
-        , indent indentation ++ ");"
-        ]
+    [i|#{padding}asm volatile("ldmatrix.sync.aligned.m8n8.#{formTag}#{modeTag}.shared.b16 {#{outputs}}, [%#{registerCount}];"
+#{operandPadding}: #{constraints "=r" registers}
+#{operandPadding}: "l"(#{sharedAddress address})
+#{padding});
+|]
   where
     formTag = ldMatrixFormTag form
+    modeTag = ldMatrixModeTag mode
     registerCount = ldMatrixRegisterCount form
+    outputs = placeholders 0 registerCount
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 renderMovMatrix :: Int -> Expr -> String
 renderMovMatrix indentation register =
-    unlines
-        [ asmOpen indentation "movmatrix.sync.aligned.m8n8.trans.b16 %0, %0;"
-        , indent (indentation + 1) ++ ": \"+r\"(" ++ renderExpr register ++ ")"
-        , indent indentation ++ ");"
-        ]
+    [i|#{padding}asm volatile("movmatrix.sync.aligned.m8n8.trans.b16 %0, %0;"
+#{operandPadding}: "+r"(#{renderExpr register})
+#{padding});
+|]
+  where
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 renderCpAsync :: Int -> CpAsyncShape -> Maybe Expr -> Expr -> Expr -> String
 renderCpAsync indentation shape sourceSize destination source =
-    unlines
-        [ asmOpen indentation instruction
-        , indent (indentation + 1) ++ ":: " ++ intercalate ", " operands
-        , indent indentation ++ ");"
-        ]
+    case sourceSize of
+        Nothing ->
+            [i|#{padding}asm volatile("cp.async.#{cache}.shared.global [%0], [%1], #{size};"
+#{operandPadding}:: "l"(#{sharedAddress destination}), "l"(&#{renderExpr source})
+#{padding});
+|]
+        Just sourceSizeExpr ->
+            [i|#{padding}asm volatile("cp.async.#{cache}.shared.global [%0], [%1], #{size}, %2;"
+#{operandPadding}:: "l"(#{sharedAddress destination}), "l"(&#{renderExpr source}), "r"(#{renderExpr sourceSizeExpr})
+#{padding});
+|]
   where
-    instruction =
-        "cp.async."
-            ++ cache
-            ++ ".shared.global [%0], [%1], "
-            ++ show size
-            ++ maybe ";" (const ", %2;") sourceSize
-    operands =
-        [ "\"l\"(" ++ sharedAddress destination ++ ")"
-        , "\"l\"(&" ++ renderExpr source ++ ")"
-        ]
-            ++ maybe
-                []
-                (\sourceSizeExpr -> ["\"r\"(" ++ renderExpr sourceSizeExpr ++ ")"])
-                sourceSize
     (cache, size) = cpAsyncInfo shape
-
-asmOpen :: Int -> String -> String
-asmOpen indentation instruction =
-    indent indentation ++ "asm volatile(\"" ++ instruction ++ "\""
-
-asmLine :: Int -> String -> String
-asmLine indentation instruction =
-    indent indentation ++ "asm volatile(\"" ++ instruction ++ "\");\n"
+    padding = indent indentation
+    operandPadding = indent (indentation + 1)
 
 constraints :: String -> [Expr] -> String
 constraints constraint =
@@ -165,7 +145,3 @@ cpAsyncInfo CacheAll4     = ("ca", 4)
 cpAsyncInfo CacheAll8     = ("ca", 8)
 cpAsyncInfo CacheAll16    = ("ca", 16)
 cpAsyncInfo CacheGlobal16 = ("cg", 16)
-
-waitGroupInstruction :: Maybe Int -> String
-waitGroupInstruction Nothing = "cp.async.wait_all;"
-waitGroupInstruction (Just groups) = "cp.async.wait_group " ++ show groups ++ ";"

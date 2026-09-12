@@ -16,6 +16,8 @@ ghc-options:
 
 library:
   source-dirs: src
+  dependencies:
+    - string-interpolate
   exposed-modules:
     - Aoewif.Target.Cuda.Sm80
     - Aoewif.Target.Cuda.Sm80.DSL

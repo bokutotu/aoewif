@@ -82,6 +82,32 @@ spec =
                                 ]
                            ]
 
+        it "renders MMA register expressions with nested indentation" $ do
+            renderOp
+                2
+                ( Mma
+                    M16N8K16BF16
+                    [ var "lhs" ! threadIdxX
+                    , var "lhs" ! (threadIdxX .+ int 1)
+                    , bitcast U32 (var "aPacked" ! int 0)
+                    , call (var "loadA") [threadIdxX]
+                    ]
+                    [ var "rhs" ! (var "k" .% int 8)
+                    , cast U32 (var "bits")
+                    ]
+                    [ var "acc" ! int 0
+                    , var "acc" ! int 1
+                    , var "acc" ! int 2
+                    , var "acc" ! int 3
+                    ]
+                )
+                `shouldBe` unlines
+                    [ "        asm volatile(\"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\""
+                    , "            : \"+f\"(acc[0]), \"+f\"(acc[1]), \"+f\"(acc[2]), \"+f\"(acc[3])"
+                    , "            : \"r\"(lhs[threadIdx.x]), \"r\"(lhs[(threadIdx.x + 1)]), \"r\"((*reinterpret_cast<uint32_t*>(&aPacked[0]))), \"r\"(loadA(threadIdx.x)), \"r\"(rhs[(k % 8)]), \"r\"(static_cast<uint32_t>(bits))"
+                    , "        );"
+                    ]
+
         it "renders every cp.async cache and size shape" $ do
             fmap
                 (renderOp 0)

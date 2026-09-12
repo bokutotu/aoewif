@@ -108,7 +108,7 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          haskellPackages = pkgs.haskell.packages.ghc9141;
+          haskellPackages = mkHaskellPackages pkgs;
         in
         haskellPackages.callCabal2nixWithOptions "aoewif" ./. "--hpack" {
           hpack = pkgs.haskellPackages.hpack;
@@ -118,7 +118,10 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           haskellPackages = mkHaskellPackages pkgs;
-          ghc = haskellPackages.ghcWithPackages (haskellPkgs: [ haskellPkgs.hspec ]);
+          ghc = haskellPackages.ghcWithPackages (haskellPkgs: [
+            haskellPkgs.hspec
+            haskellPkgs.string-interpolate
+          ]);
           cabalConfig = mkCabalConfig pkgs haskellPackages;
           haskellFormat = pkgs.writeShellApplication {
             name = "fourmolu-then-stylish-haskell";
@@ -253,7 +256,10 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           haskellPackages = mkHaskellPackages pkgs;
-          ghc = haskellPackages.ghcWithPackages (haskellPkgs: [ haskellPkgs.hspec ]);
+          ghc = haskellPackages.ghcWithPackages (haskellPkgs: [
+            haskellPkgs.hspec
+            haskellPkgs.string-interpolate
+          ]);
           cabalConfig = mkCabalConfig pkgs haskellPackages;
           hls = pkgs.writeShellScriptBin "hls" ''
             exec ${haskellPackages.haskell-language-server}/bin/haskell-language-server-wrapper "$@"
