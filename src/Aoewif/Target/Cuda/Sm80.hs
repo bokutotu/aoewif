@@ -7,12 +7,10 @@ module Aoewif.Target.Cuda.Sm80 (
     MmaShape (..),
     commitGroup,
     cpAsync,
-    declareFragment,
     ldMatrix,
     mma,
     movMatrix,
     waitGroup,
-    zeroFragment,
 ) where
 
 import           Aoewif.Target.Cuda.Sm80.DSL

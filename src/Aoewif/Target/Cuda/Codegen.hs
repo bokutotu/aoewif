@@ -76,6 +76,13 @@ renderStmt indentation stmt =
                 ++ renderName name
                 ++ renderInitializer initializer
                 ++ ";\n"
+        Syntax.Array elementType name extents ->
+            indent indentation
+                ++ renderType elementType
+                ++ " "
+                ++ renderName name
+                ++ concatMap (\extent -> "[" ++ renderExpr extent ++ "]") extents
+                ++ " = {};\n"
         Syntax.SharedDecl alignment elementType name extent ->
             indent indentation
                 ++ "__shared__ "

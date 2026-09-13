@@ -210,12 +210,11 @@ spec =
                                         (int 0)
                                         Nothing
                                     )
-                                accumulator <- declareWgmmaFragment F32 "d" 32
-                                zeroWgmmaFragment accumulator
+                                accumulator <- zeroArray F32 "d" [int 32]
                                 let mmaOperation =
                                         WgmmaBF16
                                             WgmmaFloatN64
-                                            accumulator
+                                            (WgmmaFragment [accumulator ! int index | index <- [0 .. 31]])
                                             ( WgmmaHalfSharedOperands
                                                 (WgmmaDescriptor descriptorA)
                                                 (WgmmaDescriptor descriptorB)
@@ -239,18 +238,18 @@ spec =
                                     define
                                         U32
                                         "packedTop"
-                                        ( cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [var "d0"]])
+                                        ( cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [accumulator ! int 0]])
                                             .|. shiftL
-                                                (cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [var "d1"]]))
+                                                (cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [accumulator ! int 1]]))
                                                 (int 16)
                                         )
                                 packedBottom <-
                                     define
                                         U32
                                         "packedBottom"
-                                        ( cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [var "d2"]])
+                                        ( cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [accumulator ! int 2]])
                                             .|. shiftL
-                                                (cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [var "d3"]]))
+                                                (cast U32 (call (var "__bfloat16_as_ushort") [call (var "__float2bfloat16_rn") [accumulator ! int 3]]))
                                                 (int 16)
                                         )
                                 stMatrix
@@ -338,85 +337,22 @@ spec =
                                        : "memory"
                                    );
                                }
-                               float d0;
-                               float d1;
-                               float d2;
-                               float d3;
-                               float d4;
-                               float d5;
-                               float d6;
-                               float d7;
-                               float d8;
-                               float d9;
-                               float d10;
-                               float d11;
-                               float d12;
-                               float d13;
-                               float d14;
-                               float d15;
-                               float d16;
-                               float d17;
-                               float d18;
-                               float d19;
-                               float d20;
-                               float d21;
-                               float d22;
-                               float d23;
-                               float d24;
-                               float d25;
-                               float d26;
-                               float d27;
-                               float d28;
-                               float d29;
-                               float d30;
-                               float d31;
-                               (d0 = 0);
-                               (d1 = 0);
-                               (d2 = 0);
-                               (d3 = 0);
-                               (d4 = 0);
-                               (d5 = 0);
-                               (d6 = 0);
-                               (d7 = 0);
-                               (d8 = 0);
-                               (d9 = 0);
-                               (d10 = 0);
-                               (d11 = 0);
-                               (d12 = 0);
-                               (d13 = 0);
-                               (d14 = 0);
-                               (d15 = 0);
-                               (d16 = 0);
-                               (d17 = 0);
-                               (d18 = 0);
-                               (d19 = 0);
-                               (d20 = 0);
-                               (d21 = 0);
-                               (d22 = 0);
-                               (d23 = 0);
-                               (d24 = 0);
-                               (d25 = 0);
-                               (d26 = 0);
-                               (d27 = 0);
-                               (d28 = 0);
-                               (d29 = 0);
-                               (d30 = 0);
-                               (d31 = 0);
+                               float d[32] = {};
                                asm volatile("wgmma.fence.sync.aligned;"
-                                   : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3), "+f"(d4), "+f"(d5), "+f"(d6), "+f"(d7), "+f"(d8), "+f"(d9), "+f"(d10), "+f"(d11), "+f"(d12), "+f"(d13), "+f"(d14), "+f"(d15), "+f"(d16), "+f"(d17), "+f"(d18), "+f"(d19), "+f"(d20), "+f"(d21), "+f"(d22), "+f"(d23), "+f"(d24), "+f"(d25), "+f"(d26), "+f"(d27), "+f"(d28), "+f"(d29), "+f"(d30), "+f"(d31)
+                                   : "+f"(d[0]), "+f"(d[1]), "+f"(d[2]), "+f"(d[3]), "+f"(d[4]), "+f"(d[5]), "+f"(d[6]), "+f"(d[7]), "+f"(d[8]), "+f"(d[9]), "+f"(d[10]), "+f"(d[11]), "+f"(d[12]), "+f"(d[13]), "+f"(d[14]), "+f"(d[15]), "+f"(d[16]), "+f"(d[17]), "+f"(d[18]), "+f"(d[19]), "+f"(d[20]), "+f"(d[21]), "+f"(d[22]), "+f"(d[23]), "+f"(d[24]), "+f"(d[25]), "+f"(d[26]), "+f"(d[27]), "+f"(d[28]), "+f"(d[29]), "+f"(d[30]), "+f"(d[31])
                                    :
                                    : "memory"
                                );
                                asm volatile("{ .reg .pred p; setp.ne.b32 p, %34, 0; wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 {%0, %1, %2, %3, %4, %5, %6, %7, %8, %9, %10, %11, %12, %13, %14, %15, %16, %17, %18, %19, %20, %21, %22, %23, %24, %25, %26, %27, %28, %29, %30, %31}, %32, %33, p, 1, 1, 0, 0; }"
-                                   : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3), "+f"(d4), "+f"(d5), "+f"(d6), "+f"(d7), "+f"(d8), "+f"(d9), "+f"(d10), "+f"(d11), "+f"(d12), "+f"(d13), "+f"(d14), "+f"(d15), "+f"(d16), "+f"(d17), "+f"(d18), "+f"(d19), "+f"(d20), "+f"(d21), "+f"(d22), "+f"(d23), "+f"(d24), "+f"(d25), "+f"(d26), "+f"(d27), "+f"(d28), "+f"(d29), "+f"(d30), "+f"(d31)
+                                   : "+f"(d[0]), "+f"(d[1]), "+f"(d[2]), "+f"(d[3]), "+f"(d[4]), "+f"(d[5]), "+f"(d[6]), "+f"(d[7]), "+f"(d[8]), "+f"(d[9]), "+f"(d[10]), "+f"(d[11]), "+f"(d[12]), "+f"(d[13]), "+f"(d[14]), "+f"(d[15]), "+f"(d[16]), "+f"(d[17]), "+f"(d[18]), "+f"(d[19]), "+f"(d[20]), "+f"(d[21]), "+f"(d[22]), "+f"(d[23]), "+f"(d[24]), "+f"(d[25]), "+f"(d[26]), "+f"(d[27]), "+f"(d[28]), "+f"(d[29]), "+f"(d[30]), "+f"(d[31])
                                    : "l"(descriptorA), "l"(descriptorB), "r"(1)
                                );
                                asm volatile("wgmma.commit_group.sync.aligned;" ::: "memory");
                                asm volatile("wgmma.wait_group.sync.aligned 0;" ::: "memory");
                                uint32_t warpId = ((threadIdx.x + (blockDim.x * (threadIdx.y + (blockDim.y * threadIdx.z)))) / 32);
                                uint32_t rowStride = 16;
-                               uint32_t packedTop = (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d0))) | (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d1))) << 16));
-                               uint32_t packedBottom = (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d2))) | (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d3))) << 16));
+                               uint32_t packedTop = (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d[0]))) | (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d[1]))) << 16));
+                               uint32_t packedBottom = (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d[2]))) | (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16_rn(d[3]))) << 16));
                                // Derive the lane ID automatically from the block-local linear thread ID.
                                asm volatile("stmatrix.sync.aligned.m8n8.x1.shared.b16 [%0], {%1};"
                                    :: "r"(static_cast<uint32_t>(__cvta_generic_to_shared(((sharedFirstColumns + ((warpId * 16) * rowStride))) + ((threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z)) % 32 % 8) * (rowStride)))), "r"(packedTop)

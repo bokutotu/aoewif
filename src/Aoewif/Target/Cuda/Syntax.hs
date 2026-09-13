@@ -109,6 +109,7 @@ data Expr
 
 data Stmt
     = VarDecl Type Name (Maybe Expr)
+    | Array Type Name [Expr]
     | SharedDecl Alignment Type Name Expr
     | SyncThreads
     | NamedBarrierSync Expr Expr

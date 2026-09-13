@@ -153,8 +153,7 @@ spec =
                         smemB <- shared Align16 F16 "smemB" (int 64)
                         -- 128B XOR swizzle, composed from the raw operators.
                         let swz index = xor index (shiftR index (int 3) .&. int 7)
-                        accumulator <- declareFragment F32 "c" 4
-                        zeroFragment accumulator
+                        accumulator <- zeroArray F32 "c" [int 4]
                         let kk = var "kk"
                         for_
                             (Just (Syntax.VarDecl U32 (Syntax.Name "kk") (Just (int 0))))
@@ -194,7 +193,7 @@ spec =
                                     M16N8K8F16
                                     (Fragment (take 2 (fragmentRegisters aFragment)))
                                     (Fragment (take 1 (fragmentRegisters bFragment)))
-                                    accumulator
+                                    (Fragment [accumulator ! int index | index <- [0 .. 3]])
                                 syncThreads
                 )
                 `shouldBe` """
@@ -204,14 +203,7 @@ spec =
                            extern "C" __global__ void swizzled_gemm(__half const* A, __half const* B, float* C, size_t n, size_t m, size_t k) {
                                __shared__ __align__(16) __half smemA[128];
                                __shared__ __align__(16) __half smemB[64];
-                               float c0;
-                               float c1;
-                               float c2;
-                               float c3;
-                               (c0 = 0);
-                               (c1 = 0);
-                               (c2 = 0);
-                               (c3 = 0);
+                               float c[4] = {};
                                for (uint32_t kk = 0; (kk < k); (kk = (kk + 16))) {
                                    asm volatile("cp.async.cg.shared.global [%0], [%1], 16;"
                                        :: "l"(__cvta_generic_to_shared(&smemA[(threadIdx.x ^ ((threadIdx.x >> 3) & 7))])), "l"(&A[(((((blockIdx.y * 16) + (threadIdx.x >> 3)) * k) + kk) + (threadIdx.x & 7))])
@@ -222,23 +214,19 @@ spec =
                                    asm volatile("cp.async.commit_group;");
                                    asm volatile("cp.async.wait_group 1;");
                                    __syncthreads();
-                                   uint32_t a0;
-                                   uint32_t a1;
-                                   uint32_t a2;
-                                   uint32_t a3;
+                                   uint32_t a[4] = {};
                                    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];"
-                                       : "=r"(a0), "=r"(a1), "=r"(a2), "=r"(a3)
+                                       : "=r"(a[0]), "=r"(a[1]), "=r"(a[2]), "=r"(a[3])
                                        : "l"(__cvta_generic_to_shared(&smemA[((threadIdx.x + 16) ^ (((threadIdx.x + 16) >> 3) & 7))]))
                                    );
-                                   uint32_t b0;
-                                   uint32_t b1;
+                                   uint32_t b[2] = {};
                                    asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0,%1}, [%2];"
-                                       : "=r"(b0), "=r"(b1)
+                                       : "=r"(b[0]), "=r"(b[1])
                                        : "l"(__cvta_generic_to_shared(&smemB[((threadIdx.x + 8) ^ (((threadIdx.x + 8) >> 3) & 7))]))
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c0), "+f"(c1), "+f"(c2), "+f"(c3)
-                                       : "r"(a0), "r"(a1), "r"(b0)
+                                       : "+f"(c[0]), "+f"(c[1]), "+f"(c[2]), "+f"(c[3])
+                                       : "r"(a[0]), "r"(a[1]), "r"(b[0])
                                    );
                                    __syncthreads();
                                }
@@ -263,9 +251,14 @@ spec =
                     body $ do
                         smemA <- shared Align16 F16 "smemA" (int 2048)
                         smemB <- shared Align16 F16 "smemB" (int 2048)
-                        accFrags <- forM [0 :: Int .. 7] $ \i -> declareFragment F32 ("c" ++ show i) 4
-                        mapM_ zeroFragment accFrags
-                        let tid = threadIdxX
+                        accumulator <- zeroArray F32 "c" [int 2, int 4, int 4]
+                        let accFrags =
+                                [ [ Fragment [accumulator ! int r16 ! int c8 ! int j | j <- [0 .. 3]]
+                                  | c8 <- [0 .. 3]
+                                  ]
+                                | r16 <- [0, 1]
+                                ]
+                            tid = threadIdxX
                             warp = threadIdxY
                             warpRow = shiftR warp (int 1)
                             warpCol = warp .&. int 1
@@ -357,7 +350,7 @@ spec =
                                     forM_ [0 :: Int .. 3] $ \c8 -> do
                                         let aRegs = fragmentRegisters (aFrags !! r16)
                                             bRegs = fragmentRegisters (bFrags !! c8)
-                                            acc = accFrags !! (r16 * 4 + c8)
+                                            acc = accFrags !! r16 !! c8
                                         forM_
                                             (zip3 (take 2 aRegs) (drop 2 aRegs) bRegs)
                                             $ \(aLowRegister, aHighRegister, bRegister) ->
@@ -387,8 +380,7 @@ spec =
                                 namedBarrierSync (int 1) (blockDimX .* blockDimY .* blockDimZ)
                                 computeStage kk
                                 namedBarrierSync (int 1) (blockDimX .* blockDimY .* blockDimZ)
-                        let storeTile r16 c8 = do
-                                let frag = accFrags !! (r16 * 4 + c8)
+                        let storeTile r16 c8 =
                                 forM_ [0 :: Integer .. 3] $ \j ->
                                     ( c
                                         ! ( ( blockIdxY
@@ -412,8 +404,10 @@ spec =
                                                 .* int 2
                                           )
                                     )
-                                        .= fragmentRegisters frag
-                                        !! fromIntegral j
+                                        .= accumulator
+                                        ! int (fromIntegral r16)
+                                        ! int (fromIntegral c8)
+                                        ! int j
                         forM_ [0 :: Int, 1] $ \r16 ->
                             forM_ [0 :: Int .. 3] $ \c8 ->
                                 storeTile r16 c8
@@ -425,70 +419,7 @@ spec =
                            extern "C" __global__ void gemm_f16_pipeline2(__half const* A, __half const* B, float* C, size_t n, size_t m, size_t k) {
                                __shared__ __align__(16) __half smemA[2048];
                                __shared__ __align__(16) __half smemB[2048];
-                               float c00;
-                               float c01;
-                               float c02;
-                               float c03;
-                               float c10;
-                               float c11;
-                               float c12;
-                               float c13;
-                               float c20;
-                               float c21;
-                               float c22;
-                               float c23;
-                               float c30;
-                               float c31;
-                               float c32;
-                               float c33;
-                               float c40;
-                               float c41;
-                               float c42;
-                               float c43;
-                               float c50;
-                               float c51;
-                               float c52;
-                               float c53;
-                               float c60;
-                               float c61;
-                               float c62;
-                               float c63;
-                               float c70;
-                               float c71;
-                               float c72;
-                               float c73;
-                               (c00 = 0);
-                               (c01 = 0);
-                               (c02 = 0);
-                               (c03 = 0);
-                               (c10 = 0);
-                               (c11 = 0);
-                               (c12 = 0);
-                               (c13 = 0);
-                               (c20 = 0);
-                               (c21 = 0);
-                               (c22 = 0);
-                               (c23 = 0);
-                               (c30 = 0);
-                               (c31 = 0);
-                               (c32 = 0);
-                               (c33 = 0);
-                               (c40 = 0);
-                               (c41 = 0);
-                               (c42 = 0);
-                               (c43 = 0);
-                               (c50 = 0);
-                               (c51 = 0);
-                               (c52 = 0);
-                               (c53 = 0);
-                               (c60 = 0);
-                               (c61 = 0);
-                               (c62 = 0);
-                               (c63 = 0);
-                               (c70 = 0);
-                               (c71 = 0);
-                               (c72 = 0);
-                               (c73 = 0);
+                               float c[2][4][4] = {};
                                asm volatile("cp.async.cg.shared.global [%0], [%1], 16;"
                                    :: "l"(__cvta_generic_to_shared(&smemA[((((0 >> 4) & 1) * 1024) + ((threadIdx.x ^ ((threadIdx.x >> 3) & 7)) * 8))])), "l"(&A[(((((blockIdx.y * 64) + (threadIdx.x >> 1)) * k) + 0) + ((threadIdx.x & 1) * 8))])
                                );
@@ -510,144 +441,134 @@ spec =
                                        asm volatile("cp.async.wait_group 0;");
                                    }
                                    asm volatile("barrier.sync %0, %1;" :: "r"(1), "r"(((blockDim.x * blockDim.y) * blockDim.z)) : "memory");
-                                   uint32_t a00;
-                                   uint32_t a01;
-                                   uint32_t a02;
-                                   uint32_t a03;
+                                   uint32_t a0[4] = {};
                                    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];"
-                                       : "=r"(a00), "=r"(a01), "=r"(a02), "=r"(a03)
+                                       : "=r"(a0[0]), "=r"(a0[1]), "=r"(a0[2]), "=r"(a0[3])
                                        : "l"(__cvta_generic_to_shared(&smemA[((((kk >> 4) & 1) * 1024) + (((((((threadIdx.y >> 1) * 64) + 0) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) ^ (((((((threadIdx.y >> 1) * 64) + 0) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) >> 3) & 7)) * 8))]))
                                    );
-                                   uint32_t a10;
-                                   uint32_t a11;
-                                   uint32_t a12;
-                                   uint32_t a13;
+                                   uint32_t a1[4] = {};
                                    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];"
-                                       : "=r"(a10), "=r"(a11), "=r"(a12), "=r"(a13)
+                                       : "=r"(a1[0]), "=r"(a1[1]), "=r"(a1[2]), "=r"(a1[3])
                                        : "l"(__cvta_generic_to_shared(&smemA[((((kk >> 4) & 1) * 1024) + (((((((threadIdx.y >> 1) * 64) + 32) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) ^ (((((((threadIdx.y >> 1) * 64) + 32) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) >> 3) & 7)) * 8))]))
                                    );
-                                   uint32_t b00;
-                                   uint32_t b01;
+                                   uint32_t b0[2] = {};
                                    asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0,%1}, [%2];"
-                                       : "=r"(b00), "=r"(b01)
+                                       : "=r"(b0[0]), "=r"(b0[1])
                                        : "l"(__cvta_generic_to_shared(&smemB[((((kk >> 4) & 1) * 1024) + (((((((threadIdx.y & 1) * 4) + 0) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) ^ (((((((threadIdx.y & 1) * 4) + 0) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) >> 3) & 7)) * 8))]))
                                    );
-                                   uint32_t b10;
-                                   uint32_t b11;
+                                   uint32_t b1[2] = {};
                                    asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0,%1}, [%2];"
-                                       : "=r"(b10), "=r"(b11)
+                                       : "=r"(b1[0]), "=r"(b1[1])
                                        : "l"(__cvta_generic_to_shared(&smemB[((((kk >> 4) & 1) * 1024) + (((((((threadIdx.y & 1) * 4) + 1) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) ^ (((((((threadIdx.y & 1) * 4) + 1) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) >> 3) & 7)) * 8))]))
                                    );
-                                   uint32_t b20;
-                                   uint32_t b21;
+                                   uint32_t b2[2] = {};
                                    asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0,%1}, [%2];"
-                                       : "=r"(b20), "=r"(b21)
+                                       : "=r"(b2[0]), "=r"(b2[1])
                                        : "l"(__cvta_generic_to_shared(&smemB[((((kk >> 4) & 1) * 1024) + (((((((threadIdx.y & 1) * 4) + 2) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) ^ (((((((threadIdx.y & 1) * 4) + 2) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) >> 3) & 7)) * 8))]))
                                    );
-                                   uint32_t b30;
-                                   uint32_t b31;
+                                   uint32_t b3[2] = {};
                                    asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0,%1}, [%2];"
-                                       : "=r"(b30), "=r"(b31)
+                                       : "=r"(b3[0]), "=r"(b3[1])
                                        : "l"(__cvta_generic_to_shared(&smemB[((((kk >> 4) & 1) * 1024) + (((((((threadIdx.y & 1) * 4) + 3) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) ^ (((((((threadIdx.y & 1) * 4) + 3) + ((threadIdx.x >> 3) * 8)) + (threadIdx.x & 7)) >> 3) & 7)) * 8))]))
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c00), "+f"(c01), "+f"(c02), "+f"(c03)
-                                       : "r"(a00), "r"(a02), "r"(b00)
+                                       : "+f"(c[0][0][0]), "+f"(c[0][0][1]), "+f"(c[0][0][2]), "+f"(c[0][0][3])
+                                       : "r"(a0[0]), "r"(a0[2]), "r"(b0[0])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c00), "+f"(c01), "+f"(c02), "+f"(c03)
-                                       : "r"(a01), "r"(a03), "r"(b01)
+                                       : "+f"(c[0][0][0]), "+f"(c[0][0][1]), "+f"(c[0][0][2]), "+f"(c[0][0][3])
+                                       : "r"(a0[1]), "r"(a0[3]), "r"(b0[1])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c10), "+f"(c11), "+f"(c12), "+f"(c13)
-                                       : "r"(a00), "r"(a02), "r"(b10)
+                                       : "+f"(c[0][1][0]), "+f"(c[0][1][1]), "+f"(c[0][1][2]), "+f"(c[0][1][3])
+                                       : "r"(a0[0]), "r"(a0[2]), "r"(b1[0])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c10), "+f"(c11), "+f"(c12), "+f"(c13)
-                                       : "r"(a01), "r"(a03), "r"(b11)
+                                       : "+f"(c[0][1][0]), "+f"(c[0][1][1]), "+f"(c[0][1][2]), "+f"(c[0][1][3])
+                                       : "r"(a0[1]), "r"(a0[3]), "r"(b1[1])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c20), "+f"(c21), "+f"(c22), "+f"(c23)
-                                       : "r"(a00), "r"(a02), "r"(b20)
+                                       : "+f"(c[0][2][0]), "+f"(c[0][2][1]), "+f"(c[0][2][2]), "+f"(c[0][2][3])
+                                       : "r"(a0[0]), "r"(a0[2]), "r"(b2[0])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c20), "+f"(c21), "+f"(c22), "+f"(c23)
-                                       : "r"(a01), "r"(a03), "r"(b21)
+                                       : "+f"(c[0][2][0]), "+f"(c[0][2][1]), "+f"(c[0][2][2]), "+f"(c[0][2][3])
+                                       : "r"(a0[1]), "r"(a0[3]), "r"(b2[1])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c30), "+f"(c31), "+f"(c32), "+f"(c33)
-                                       : "r"(a00), "r"(a02), "r"(b30)
+                                       : "+f"(c[0][3][0]), "+f"(c[0][3][1]), "+f"(c[0][3][2]), "+f"(c[0][3][3])
+                                       : "r"(a0[0]), "r"(a0[2]), "r"(b3[0])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c30), "+f"(c31), "+f"(c32), "+f"(c33)
-                                       : "r"(a01), "r"(a03), "r"(b31)
+                                       : "+f"(c[0][3][0]), "+f"(c[0][3][1]), "+f"(c[0][3][2]), "+f"(c[0][3][3])
+                                       : "r"(a0[1]), "r"(a0[3]), "r"(b3[1])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c40), "+f"(c41), "+f"(c42), "+f"(c43)
-                                       : "r"(a10), "r"(a12), "r"(b00)
+                                       : "+f"(c[1][0][0]), "+f"(c[1][0][1]), "+f"(c[1][0][2]), "+f"(c[1][0][3])
+                                       : "r"(a1[0]), "r"(a1[2]), "r"(b0[0])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c40), "+f"(c41), "+f"(c42), "+f"(c43)
-                                       : "r"(a11), "r"(a13), "r"(b01)
+                                       : "+f"(c[1][0][0]), "+f"(c[1][0][1]), "+f"(c[1][0][2]), "+f"(c[1][0][3])
+                                       : "r"(a1[1]), "r"(a1[3]), "r"(b0[1])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c50), "+f"(c51), "+f"(c52), "+f"(c53)
-                                       : "r"(a10), "r"(a12), "r"(b10)
+                                       : "+f"(c[1][1][0]), "+f"(c[1][1][1]), "+f"(c[1][1][2]), "+f"(c[1][1][3])
+                                       : "r"(a1[0]), "r"(a1[2]), "r"(b1[0])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c50), "+f"(c51), "+f"(c52), "+f"(c53)
-                                       : "r"(a11), "r"(a13), "r"(b11)
+                                       : "+f"(c[1][1][0]), "+f"(c[1][1][1]), "+f"(c[1][1][2]), "+f"(c[1][1][3])
+                                       : "r"(a1[1]), "r"(a1[3]), "r"(b1[1])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c60), "+f"(c61), "+f"(c62), "+f"(c63)
-                                       : "r"(a10), "r"(a12), "r"(b20)
+                                       : "+f"(c[1][2][0]), "+f"(c[1][2][1]), "+f"(c[1][2][2]), "+f"(c[1][2][3])
+                                       : "r"(a1[0]), "r"(a1[2]), "r"(b2[0])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c60), "+f"(c61), "+f"(c62), "+f"(c63)
-                                       : "r"(a11), "r"(a13), "r"(b21)
+                                       : "+f"(c[1][2][0]), "+f"(c[1][2][1]), "+f"(c[1][2][2]), "+f"(c[1][2][3])
+                                       : "r"(a1[1]), "r"(a1[3]), "r"(b2[1])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c70), "+f"(c71), "+f"(c72), "+f"(c73)
-                                       : "r"(a10), "r"(a12), "r"(b30)
+                                       : "+f"(c[1][3][0]), "+f"(c[1][3][1]), "+f"(c[1][3][2]), "+f"(c[1][3][3])
+                                       : "r"(a1[0]), "r"(a1[2]), "r"(b3[0])
                                    );
                                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5}, {%6}, {%0,%1,%2,%3};"
-                                       : "+f"(c70), "+f"(c71), "+f"(c72), "+f"(c73)
-                                       : "r"(a11), "r"(a13), "r"(b31)
+                                       : "+f"(c[1][3][0]), "+f"(c[1][3][1]), "+f"(c[1][3][2]), "+f"(c[1][3][3])
+                                       : "r"(a1[1]), "r"(a1[3]), "r"(b3[1])
                                    );
                                    asm volatile("barrier.sync %0, %1;" :: "r"(1), "r"(((blockDim.x * blockDim.y) * blockDim.z)) : "memory");
                                }
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c00);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c01);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c02);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c03);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c10);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c11);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c12);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c13);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c20);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c21);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c22);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c23);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c30);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c31);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c32);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c33);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c40);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c41);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c42);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c43);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c50);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c51);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c52);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c53);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c60);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c61);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c62);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c63);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c70);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c71);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c72);
-                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c73);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][0][0]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][0][1]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][0][2]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][0][3]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][1][0]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][1][1]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][1][2]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][1][3]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][2][0]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][2][1]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][2][2]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][2][3]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][3][0]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][3][1]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][3][2]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 0) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[0][3][3]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][0][0]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][0][1]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][0][2]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 0) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][0][3]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][1][0]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][1][1]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][1][2]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 8) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][1][3]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][2][0]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][2][1]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][2][2]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 16) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][2][3]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((0 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((0 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][3][0]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((1 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((1 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][3][1]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((2 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((2 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][3][2]);
+                               (C[(((((((((((blockIdx.y * 64) + ((threadIdx.y >> 1) * 32)) + 16) + ((3 >> 1) * 8)) + (threadIdx.x >> 2)) * n) + (blockIdx.x * 64)) + ((threadIdx.y & 1) * 32)) + 24) + ((3 & 1) * 2)) + ((threadIdx.x & 3) * 2))] = c[1][3][3]);
                            }
 
                            """
@@ -672,17 +593,16 @@ spec =
 
                            extern "C" __global__ void transpose_fragment() {
                                __shared__ __align__(16) __half tile[64];
-                               uint32_t fragment0;
-                               uint32_t fragment1;
+                               uint32_t fragment[2] = {};
                                asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0,%1}, [%2];"
-                                   : "=r"(fragment0), "=r"(fragment1)
+                                   : "=r"(fragment[0]), "=r"(fragment[1])
                                    : "l"(__cvta_generic_to_shared(&tile[threadIdx.x]))
                                );
                                asm volatile("movmatrix.sync.aligned.m8n8.trans.b16 %0, %0;"
-                                   : "+r"(fragment0)
+                                   : "+r"(fragment[0])
                                );
                                asm volatile("movmatrix.sync.aligned.m8n8.trans.b16 %0, %0;"
-                                   : "+r"(fragment1)
+                                   : "+r"(fragment[1])
                                );
                            }
 

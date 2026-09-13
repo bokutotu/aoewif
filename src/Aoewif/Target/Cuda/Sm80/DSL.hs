@@ -1,16 +1,14 @@
 module Aoewif.Target.Cuda.Sm80.DSL (
     commitGroup,
     cpAsync,
-    declareFragment,
     ldMatrix,
     mma,
     movMatrix,
     waitGroup,
-    zeroFragment,
 ) where
 
-import           Aoewif.Target.Cuda.DSL              (Block, Type (U32),
-                                                      declare, emit, int, (.=))
+import           Aoewif.Target.Cuda.DSL              (Block, Type (U32), emit,
+                                                      int, zeroArray, (!))
 import           Aoewif.Target.Cuda.Sm80.Instruction (CpAsyncShape,
                                                       Fragment (..),
                                                       LdMatrixForm,
@@ -21,19 +19,13 @@ import           Aoewif.Target.Cuda.Sm80.Render      ()
 import           Aoewif.Target.Cuda.Syntax           (Expr, Stmt (Op))
 import           Aoewif.Target.Cuda.TensorCoreOp     (TensorCoreOp (TensorCoreOp))
 
-declareFragment :: Type -> String -> Int -> Block Fragment
-declareFragment registerType prefix registerCount = Fragment <$> mapM declareRegister [0 .. registerCount - 1]
-  where
-    declareRegister index = declare registerType (prefix ++ show index)
-
-zeroFragment :: Fragment -> Block ()
-zeroFragment = mapM_ (.= int 0) . fragmentRegisters
-
 ldMatrix :: String -> LdMatrixForm -> LdMatrixMode -> Expr -> Block Fragment
-ldMatrix prefix form mode address = do
-    fragment <- declareFragment U32 prefix (ldMatrixRegisterCount form)
-    emit (Op (TensorCoreOp (LdMatrix mode form (fragmentRegisters fragment) address)))
-    pure fragment
+ldMatrix name form mode address = do
+    let registerCount = ldMatrixRegisterCount form
+    array <- zeroArray U32 name [int (fromIntegral registerCount)]
+    let registers = [array ! int (fromIntegral index) | index <- [0 .. registerCount - 1]]
+    emit (Op (TensorCoreOp (LdMatrix mode form registers address)))
+    pure (Fragment registers)
 
 movMatrix :: Fragment -> Block ()
 movMatrix (Fragment registers) =

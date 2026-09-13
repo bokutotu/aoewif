@@ -44,6 +44,7 @@ module Aoewif.Target.Cuda.DSL (
     threadIdxZ,
     var,
     xor,
+    zeroArray,
     (!),
     (.*),
     (./),
@@ -87,6 +88,13 @@ body = pure
 declare :: Type -> String -> Block Expr
 declare variableType text = do
     emit (VarDecl variableType name Nothing)
+    pure (Var name)
+  where
+    name = Name text
+
+zeroArray :: Type -> String -> [Expr] -> Block Expr
+zeroArray elementType text extents = do
+    emit (Array elementType name extents)
     pure (Var name)
   where
     name = Name text

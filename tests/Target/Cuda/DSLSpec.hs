@@ -7,20 +7,34 @@ import           Test.Hspec                 (Spec, describe, it, shouldBe)
 spec :: Spec
 spec =
     describe "CUDA DSL" $ do
-        it "renders shared declarations with natural, 16-byte, and 128-byte alignment" $ do
-            let generated = Codegen.generate $ kernel "shared_alignments" $ body $ do
+        it "renders zero-initialized multidimensional private arrays and aligned shared declarations" $ do
+            let generated = Codegen.generate $ kernel "array_declarations" $ body $ do
                     _ <- shared NaturalAlignment U32 "natural" (int 4)
                     _ <- shared Align16 U32 "aligned16" (int 8)
                     _ <- shared Align128 U32 "aligned128" (int 32)
-                    pure ()
+                    values <- zeroArray U32 "values" [int 4]
+                    tile <- zeroArray F32 "tile" [int 2, int 3 .+ int 1]
+                    values ! int 2 .= int 7
+                    tile ! int 1 ! int 3 .= float 1.25
+                    if_ (threadIdxX .== int 0) $ do
+                        scratch <- zeroArray U32 "scratch" [int 2, int 3, int 4, int 5]
+                        scratch ! int 1 ! int 2 ! int 3 ! int 4 .= values ! int 2
                 expected =
                     unlines
                         [ "#include <stdint.h>"
                         , ""
-                        , "extern \"C\" __global__ void shared_alignments() {"
+                        , "extern \"C\" __global__ void array_declarations() {"
                         , "    __shared__ uint32_t natural[4];"
                         , "    __shared__ __align__(16) uint32_t aligned16[8];"
                         , "    __shared__ __align__(128) uint32_t aligned128[32];"
+                        , "    uint32_t values[4] = {};"
+                        , "    float tile[2][(3 + 1)] = {};"
+                        , "    (values[2] = 7);"
+                        , "    (tile[1][3] = 1.25f);"
+                        , "    if ((threadIdx.x == 0)) {"
+                        , "        uint32_t scratch[2][3][4][5] = {};"
+                        , "        (scratch[1][2][3][4] = values[2]);"
+                        , "    }"
                         , "}"
                         ]
             generated `shouldBe` expected

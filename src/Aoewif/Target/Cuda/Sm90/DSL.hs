@@ -3,7 +3,6 @@ module Aoewif.Target.Cuda.Sm90.DSL (
     bulkWaitGroup,
     clusterBarrierArrive,
     clusterBarrierWait,
-    declareWgmmaFragment,
     electSync,
     fenceMBarrierInit,
     fenceProxyAsync,
@@ -26,23 +25,13 @@ module Aoewif.Target.Cuda.Sm90.DSL (
     wgmmaFence,
     wgmmaMmaAsync,
     wgmmaWaitGroup,
-    zeroWgmmaFragment,
 ) where
 
-import           Aoewif.Target.Cuda.DSL              (Block, Type, declare,
-                                                      emit, int, (.=))
+import           Aoewif.Target.Cuda.DSL              (Block, emit)
 import           Aoewif.Target.Cuda.Sm90.Instruction
 import           Aoewif.Target.Cuda.Sm90.Render      ()
 import           Aoewif.Target.Cuda.Syntax           (Expr, Stmt (Op))
 import           Aoewif.Target.Cuda.TensorCoreOp     (TensorCoreOp (TensorCoreOp))
-
-declareWgmmaFragment :: Type -> String -> Int -> Block WgmmaFragment
-declareWgmmaFragment registerType prefix registerCount = WgmmaFragment <$> mapM declareRegister [0 .. registerCount - 1]
-  where
-    declareRegister index = declare registerType (prefix ++ show index)
-
-zeroWgmmaFragment :: WgmmaFragment -> Block ()
-zeroWgmmaFragment = mapM_ (.= int 0) . wgmmaFragmentRegisters
 
 wgmmaMmaAsync :: WgmmaMma -> Block ()
 wgmmaMmaAsync = emitSm90 . WgmmaMmaAsync
