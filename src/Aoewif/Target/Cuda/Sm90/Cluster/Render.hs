@@ -39,42 +39,29 @@ renderClusterBarrierWait indentation =
 
 renderClusterSpecialRegister :: Int -> Expr -> ClusterSpecialRegister -> String
 renderClusterSpecialRegister indentation destination specialRegister =
-    case clusterSpecialRegisterInfo specialRegister of
-        ClusterU32SpecialRegister registerName ->
-            [i|#{padding}asm volatile("mov.u32 %0, %%#{registerName};"
-#{operandPadding}: "=r"(#{renderExpr destination})
-#{padding});
-|]
-        ClusterPredicateSpecialRegister registerName ->
-            [i|#{padding}asm volatile("{ .reg .pred p; mov.pred p, %%#{registerName}; selp.b32 %0, 1, 0, p; }"
-#{operandPadding}: "=r"(#{renderExpr destination})
-#{padding});
+    [i|#{padding}#{renderExpr destination} = cuda::ptx::get_sreg_#{registerName}();
 |]
   where
     padding = indent indentation
-    operandPadding = indent (indentation + 1)
+    registerName = clusterSpecialRegisterName specialRegister
 
-data ClusterSpecialRegisterInfo
-    = ClusterU32SpecialRegister String
-    | ClusterPredicateSpecialRegister String
-
-clusterSpecialRegisterInfo :: ClusterSpecialRegister -> ClusterSpecialRegisterInfo
-clusterSpecialRegisterInfo specialRegister =
+clusterSpecialRegisterName :: ClusterSpecialRegister -> String
+clusterSpecialRegisterName specialRegister =
     case specialRegister of
         ClusterId dimension ->
-            ClusterU32SpecialRegister [i|clusterid.#{clusterDimensionTag dimension}|]
+            [i|clusterid_#{clusterDimensionTag dimension}|]
         NClusterId dimension ->
-            ClusterU32SpecialRegister [i|nclusterid.#{clusterDimensionTag dimension}|]
+            [i|nclusterid_#{clusterDimensionTag dimension}|]
         ClusterCtaId dimension ->
-            ClusterU32SpecialRegister [i|cluster_ctaid.#{clusterDimensionTag dimension}|]
+            [i|cluster_ctaid_#{clusterDimensionTag dimension}|]
         ClusterNCtaId dimension ->
-            ClusterU32SpecialRegister [i|cluster_nctaid.#{clusterDimensionTag dimension}|]
+            [i|cluster_nctaid_#{clusterDimensionTag dimension}|]
         ClusterCtaRank ->
-            ClusterU32SpecialRegister "cluster_ctarank"
+            "cluster_ctarank"
         ClusterNCtaRank ->
-            ClusterU32SpecialRegister "cluster_nctarank"
+            "cluster_nctarank"
         IsExplicitCluster ->
-            ClusterPredicateSpecialRegister "is_explicit_cluster"
+            "is_explicit_cluster"
 
 renderMapSharedCluster :: Int -> ClusterAddressWidth -> Expr -> Expr -> Expr -> String
 renderMapSharedCluster indentation width destination source ctaRank =

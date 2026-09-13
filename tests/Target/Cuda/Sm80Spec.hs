@@ -198,6 +198,7 @@ spec =
                 )
                 `shouldBe` """
                            #include <stdint.h>
+                           #include <cuda/ptx>
                            #include <cuda_fp16.h>
 
                            extern "C" __global__ void swizzled_gemm(__half const* A, __half const* B, float* C, size_t n, size_t m, size_t k) {
@@ -414,6 +415,7 @@ spec =
                 )
                 `shouldBe` """
                            #include <stdint.h>
+                           #include <cuda/ptx>
                            #include <cuda_fp16.h>
 
                            extern "C" __global__ void gemm_f16_pipeline2(__half const* A, __half const* B, float* C, size_t n, size_t m, size_t k) {
@@ -589,6 +591,7 @@ spec =
                 )
                 `shouldBe` """
                            #include <stdint.h>
+                           #include <cuda/ptx>
                            #include <cuda_fp16.h>
 
                            extern "C" __global__ void transpose_fragment() {
@@ -624,6 +627,7 @@ spec =
                 )
                 `shouldBe` """
                            #include <stdint.h>
+                           #include <cuda/ptx>
                            #include <cuda_fp16.h>
 
                            extern "C" __global__ void zfill(__half const* source, uint32_t remaining) {

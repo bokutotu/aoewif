@@ -38,7 +38,7 @@ generateWith config (Syntax.Kernel name parameters body) =
 
 renderIncludes :: [Include] -> String
 renderIncludes configuredIncludes =
-    unlines ("#include <stdint.h>" : map renderInclude configuredIncludes) ++ "\n"
+    unlines (["#include <stdint.h>", "#include <cuda/ptx>"] ++ map renderInclude configuredIncludes) ++ "\n"
 
 renderInclude :: Include -> String
 renderInclude CudaFp16Header = "#include <cuda_fp16.h>"

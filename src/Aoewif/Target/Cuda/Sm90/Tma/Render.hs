@@ -20,11 +20,12 @@ import           Aoewif.Target.Cuda.Sm90.Tma.Instruction      (BulkWaitMode (..)
                                                                TmaTensorMap (..),
                                                                TmaTensorOp (..))
 import           Aoewif.Target.Cuda.Syntax                    (Expr)
+import           Data.List                                    (intercalate)
 import           Data.String.Interpolate                      (i)
 
 renderBulkCommitGroup :: Int -> String
 renderBulkCommitGroup indentation =
-    [i|#{padding}asm volatile("cp.async.bulk.commit_group;" ::: "memory");
+    [i|#{padding}cuda::ptx::cp_async_bulk_commit_group();
 |]
   where
     padding = indent indentation
@@ -33,10 +34,10 @@ renderBulkWaitGroup :: Int -> BulkWaitMode -> Int -> String
 renderBulkWaitGroup indentation mode groupCount =
     case mode of
         BulkWaitComplete ->
-            [i|#{padding}asm volatile("cp.async.bulk.wait_group #{groupCount};" ::: "memory");
+            [i|#{padding}cuda::ptx::cp_async_bulk_wait_group(cuda::ptx::n32_t<#{groupCount}>{});
 |]
         BulkWaitRead ->
-            [i|#{padding}asm volatile("cp.async.bulk.wait_group.read #{groupCount};" ::: "memory");
+            [i|#{padding}cuda::ptx::cp_async_bulk_wait_group_read(cuda::ptx::n32_t<#{groupCount}>{});
 |]
   where
     padding = indent indentation
@@ -64,10 +65,10 @@ renderTmaTensorLoad :: Int -> TmaLoadDestination -> TmaTensorMap -> TmaCoordinat
 renderTmaTensorLoad indentation destination (TmaTensorMap tensorMap) coordinates (MBarrier barrier) cachePolicy =
     case (destination, cachePolicy) of
         (TmaCtaShared destinationAddress, Nothing) ->
-            [i|#{padding}asm volatile("cp.async.bulk.tensor.#{dimension}d.shared::cta.global.mbarrier::complete_tx::bytes [%0], [%1, {#{coordinatePlaceholders}}], [%#{barrierIndex}];"
-#{operandPadding}:: "l"(#{sharedAddress destinationAddress}), "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "l"(#{sharedAddress barrier})
-#{operandPadding}: "memory"
-#{padding});
+            [i|#{padding}cuda::ptx::cp_async_bulk_tensor(
+#{operandPadding}cuda::ptx::space_shared, cuda::ptx::space_global,
+#{operandPadding}&#{renderExpr destinationAddress}, reinterpret_cast<const void*>(#{renderExpr tensorMap}),
+#{operandPadding}{#{renderTmaCoordinates coordinateExpressions}}, reinterpret_cast<uint64_t*>(&#{renderExpr barrier}));
 |]
         (TmaCtaShared destinationAddress, Just (TmaCachePolicy policy)) ->
             [i|#{padding}asm volatile("cp.async.bulk.tensor.#{dimension}d.shared::cta.global.mbarrier::complete_tx::bytes.L2::cache_hint [%0], [%1, {#{coordinatePlaceholders}}], [%#{barrierIndex}], %#{cacheIndex};"
@@ -88,10 +89,10 @@ renderTmaTensorLoad indentation destination (TmaTensorMap tensorMap) coordinates
 #{padding});
 |]
         (TmaMulticastClusterShared destinationAddress ctaMask, Nothing) ->
-            [i|#{padding}asm volatile("{ .reg .b16 cta_mask; .reg .b16 unused; mov.b32 {cta_mask, unused}, %#{maskIndex}; cp.async.bulk.tensor.#{dimension}d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster [%0], [%1, {#{coordinatePlaceholders}}], [%#{barrierIndex}], cta_mask; }"
-#{operandPadding}:: "l"(#{sharedAddress destinationAddress}), "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "l"(#{sharedAddress barrier}), "r"(#{renderExpr ctaMask})
-#{operandPadding}: "memory"
-#{padding});
+            [i|#{padding}cuda::ptx::cp_async_bulk_tensor(
+#{operandPadding}cuda::ptx::space_cluster, cuda::ptx::space_global,
+#{operandPadding}&#{renderExpr destinationAddress}, reinterpret_cast<const void*>(#{renderExpr tensorMap}),
+#{operandPadding}{#{renderTmaCoordinates coordinateExpressions}}, reinterpret_cast<uint64_t*>(&#{renderExpr barrier}), static_cast<uint16_t>(#{renderExpr ctaMask}));
 |]
         (TmaMulticastClusterShared destinationAddress ctaMask, Just (TmaCachePolicy policy)) ->
             [i|#{padding}asm volatile("{ .reg .b16 cta_mask; .reg .b16 unused; mov.b32 {cta_mask, unused}, %#{maskIndex}; cp.async.bulk.tensor.#{dimension}d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster.L2::cache_hint [%0], [%1, {#{coordinatePlaceholders}}], [%#{barrierIndex}], cta_mask, %#{multicastCacheIndex}; }"
@@ -113,10 +114,9 @@ renderTmaTensorStore :: Int -> TmaTensorMap -> TmaCoordinates -> Expr -> Maybe T
 renderTmaTensorStore indentation (TmaTensorMap tensorMap) coordinates source cachePolicy =
     case cachePolicy of
         Nothing ->
-            [i|#{padding}asm volatile("cp.async.bulk.tensor.#{dimension}d.global.shared::cta.bulk_group [%0, {#{coordinatePlaceholders}}], [%#{sourceIndex}];"
-#{operandPadding}:: "l"(#{renderExpr tensorMap}), #{constraints "r" coordinateExpressions}, "l"(#{sharedAddress source})
-#{operandPadding}: "memory"
-#{padding});
+            [i|#{padding}cuda::ptx::cp_async_bulk_tensor(
+#{operandPadding}cuda::ptx::space_global, cuda::ptx::space_shared,
+#{operandPadding}reinterpret_cast<const void*>(#{renderExpr tensorMap}), {#{renderTmaCoordinates coordinateExpressions}}, &#{renderExpr source});
 |]
         Just (TmaCachePolicy policy) ->
             [i|#{padding}asm volatile("cp.async.bulk.tensor.#{dimension}d.global.shared::cta.bulk_group.L2::cache_hint [%0, {#{coordinatePlaceholders}}], [%#{sourceIndex}], %#{cacheIndex};"
@@ -131,6 +131,10 @@ renderTmaTensorStore indentation (TmaTensorMap tensorMap) coordinates source cac
     cacheIndex = sourceIndex + 1
     padding = indent indentation
     operandPadding = indent (indentation + 1)
+
+renderTmaCoordinates :: [Expr] -> String
+renderTmaCoordinates coordinates =
+    intercalate ", " [[i|static_cast<int32_t>(#{renderExpr coordinate})|] | coordinate <- coordinates]
 
 tmaCoordinateInfo :: TmaCoordinates -> (Int, [Expr])
 tmaCoordinateInfo coordinates =

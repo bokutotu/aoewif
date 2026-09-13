@@ -46,10 +46,10 @@ instance RenderOp Sm90Op where
             MBarrierInstruction barrierOperation ->
                 renderMBarrier indentation barrierOperation
             FenceProxyAsync SharedCta ->
-                [i|#{padding}asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
+                [i|#{padding}cuda::ptx::fence_proxy_async(cuda::ptx::space_shared);
 |]
             FenceProxyAsync SharedCluster ->
-                [i|#{padding}asm volatile("fence.proxy.async.shared::cluster;" ::: "memory");
+                [i|#{padding}cuda::ptx::fence_proxy_async(cuda::ptx::space_cluster);
 |]
             FenceMBarrierInit ->
                 renderFenceMBarrierInit indentation

@@ -268,6 +268,7 @@ spec =
             generated
                 `shouldBe` """
                            #include <stdint.h>
+                           #include <cuda/ptx>
                            #include <cuda_bf16.h>
 
                            extern "C" __global__ void clustered_gemm(size_t tensorMapA, size_t tensorMapB, size_t descriptorA, size_t descriptorB, size_t m, size_t n, size_t k) {
@@ -278,64 +279,40 @@ spec =
                                __shared__ size_t barrierB[1];
                                uint32_t ctaX;
                                uint32_t ctaY;
-                               asm volatile("mov.u32 %0, %%cluster_ctaid.x;"
-                                   : "=r"(ctaX)
-                               );
-                               asm volatile("mov.u32 %0, %%cluster_ctaid.y;"
-                                   : "=r"(ctaY)
-                               );
+                               ctaX = cuda::ptx::get_sreg_cluster_ctaid_x();
+                               ctaY = cuda::ptx::get_sreg_cluster_ctaid_y();
                                if ((threadIdx.x == 0)) {
-                                   asm volatile("mbarrier.init.shared::cta.b64 [%0], %1;"
-                                       :: "l"(__cvta_generic_to_shared(&barrierA)), "r"(1)
-                                       : "memory"
-                                   );
-                                   asm volatile("mbarrier.init.shared::cta.b64 [%0], %1;"
-                                       :: "l"(__cvta_generic_to_shared(&barrierB)), "r"(1)
-                                       : "memory"
-                                   );
-                                   asm volatile("fence.mbarrier_init.release.cluster;" ::: "memory");
+                                   cuda::ptx::mbarrier_init(reinterpret_cast<uint64_t*>(&barrierA), 1);
+                                   cuda::ptx::mbarrier_init(reinterpret_cast<uint64_t*>(&barrierB), 1);
+                                   cuda::ptx::fence_mbarrier_init(cuda::ptx::sem_release, cuda::ptx::scope_cluster);
                                }
                                asm volatile("barrier.cluster.arrive.release.aligned;" ::: "memory");
                                asm volatile("barrier.cluster.wait.acquire.aligned;" ::: "memory");
                                if ((threadIdx.x == 0)) {
-                                   asm volatile("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;"
-                                       :: "l"(__cvta_generic_to_shared(&barrierA)), "r"(16384)
-                                       : "memory"
-                                   );
-                                   asm volatile("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;"
-                                       :: "l"(__cvta_generic_to_shared(&barrierB)), "r"(16384)
-                                       : "memory"
-                                   );
+                                   cuda::ptx::mbarrier_arrive_expect_tx(cuda::ptx::sem_release, cuda::ptx::scope_cta, cuda::ptx::space_shared, reinterpret_cast<uint64_t*>(&barrierA), 16384);
+                                   cuda::ptx::mbarrier_arrive_expect_tx(cuda::ptx::sem_release, cuda::ptx::scope_cta, cuda::ptx::space_shared, reinterpret_cast<uint64_t*>(&barrierB), 16384);
                                }
                                asm volatile("barrier.cluster.arrive.release.aligned;" ::: "memory");
                                asm volatile("barrier.cluster.wait.acquire.aligned;" ::: "memory");
                                uint32_t multicastMaskA = ((ctaY == 0) ? 3 : 12);
                                uint32_t multicastMaskB = ((ctaX == 0) ? 5 : 10);
                                if (((threadIdx.x == 0) && (ctaX == 0))) {
-                                   asm volatile("{ .reg .b16 cta_mask; .reg .b16 unused; mov.b32 {cta_mask, unused}, %5; cp.async.bulk.tensor.2d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster [%0], [%1, {%2, %3}], [%4], cta_mask; }"
-                                       :: "l"(__cvta_generic_to_shared(&sharedA)), "l"(tensorMapA), "r"(0), "r"((blockIdx.y * 64)), "l"(__cvta_generic_to_shared(&barrierA)), "r"(multicastMaskA)
-                                       : "memory"
-                                   );
+                                   cuda::ptx::cp_async_bulk_tensor(
+                                       cuda::ptx::space_cluster, cuda::ptx::space_global,
+                                       &sharedA, reinterpret_cast<const void*>(tensorMapA),
+                                       {static_cast<int32_t>(0), static_cast<int32_t>((blockIdx.y * 64))}, reinterpret_cast<uint64_t*>(&barrierA), static_cast<uint16_t>(multicastMaskA));
                                }
                                if (((threadIdx.x == 0) && (ctaY == 0))) {
-                                   asm volatile("{ .reg .b16 cta_mask; .reg .b16 unused; mov.b32 {cta_mask, unused}, %5; cp.async.bulk.tensor.2d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster [%0], [%1, {%2, %3}], [%4], cta_mask; }"
-                                       :: "l"(__cvta_generic_to_shared(&sharedB)), "l"(tensorMapB), "r"(0), "r"((blockIdx.x * 64)), "l"(__cvta_generic_to_shared(&barrierB)), "r"(multicastMaskB)
-                                       : "memory"
-                                   );
+                                   cuda::ptx::cp_async_bulk_tensor(
+                                       cuda::ptx::space_cluster, cuda::ptx::space_global,
+                                       &sharedB, reinterpret_cast<const void*>(tensorMapB),
+                                       {static_cast<int32_t>(0), static_cast<int32_t>((blockIdx.x * 64))}, reinterpret_cast<uint64_t*>(&barrierB), static_cast<uint16_t>(multicastMaskB));
                                }
                                for (uint32_t completeA = 0; (completeA == 0); (completeA = completeA)) {
-                                   asm volatile("{ .reg .pred p; mbarrier.try_wait.parity.shared::cta.b64 p, [%1], %2; selp.b32 %0, 1, 0, p; }"
-                                       : "=r"(completeA)
-                                       : "l"(__cvta_generic_to_shared(&barrierA)), "r"(0)
-                                       : "memory"
-                                   );
+                                   completeA = cuda::ptx::mbarrier_try_wait_parity(reinterpret_cast<uint64_t*>(&barrierA), 0);
                                }
                                for (uint32_t completeB = 0; (completeB == 0); (completeB = completeB)) {
-                                   asm volatile("{ .reg .pred p; mbarrier.try_wait.parity.shared::cta.b64 p, [%1], %2; selp.b32 %0, 1, 0, p; }"
-                                       : "=r"(completeB)
-                                       : "l"(__cvta_generic_to_shared(&barrierB)), "r"(0)
-                                       : "memory"
-                                   );
+                                   completeB = cuda::ptx::mbarrier_try_wait_parity(reinterpret_cast<uint64_t*>(&barrierB), 0);
                                }
                                float d[32] = {};
                                asm volatile("wgmma.fence.sync.aligned;"

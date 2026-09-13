@@ -22,6 +22,7 @@ spec =
                 expected =
                     unlines
                         [ "#include <stdint.h>"
+                        , "#include <cuda/ptx>"
                         , ""
                         , "extern \"C\" __global__ void array_declarations() {"
                         , "    __shared__ uint32_t natural[4];"
@@ -140,6 +141,7 @@ spec =
                 expected =
                     unlines
                         [ "#include <stdint.h>"
+                        , "#include <cuda/ptx>"
                         , ""
                         , "extern \"C\" __global__ void calls() {"
                         , "    float value = sqrtf(4.0f);"
