@@ -18,6 +18,43 @@
         "x86_64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
+      mkCudaPackages =
+        system:
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnfreePredicate =
+              package:
+              builtins.elem (nixpkgs.lib.getName package) [
+                "cuda_nvcc"
+                "cuda_cudart"
+                "cuda_crt"
+                "libnvvm"
+              ];
+          };
+          # CUDA 13.0's bundled CCCL does not enable tcgen05 wrappers for sm_103a.
+          cccl = pkgs.stdenvNoCC.mkDerivation rec {
+            pname = "cccl";
+            version = "3.4.2";
+            src = pkgs.fetchFromGitHub {
+              owner = "NVIDIA";
+              repo = "cccl";
+              tag = "v${version}";
+              hash = "sha256-HA7J5ZzMwiJ4xqKtbWzPBVm06FhP/EmL/AAgUEYkucc=";
+            };
+            dontConfigure = true;
+            dontBuild = true;
+            installPhase = ''
+              runHook preInstall
+              mkdir -p "$out/include"
+              cp -r libcudacxx/include/. "$out/include/"
+              cp -r cub/cub thrust/thrust "$out/include/"
+              runHook postInstall
+            '';
+          };
+        in
+        # flake.lock pins nvcc 13.0.88 and its host compiler as well.
+        pkgs.cudaPackages_13_0.overrideScope (_: _: { inherit cccl; });
       mkHaskellPackages =
         pkgs:
         let
@@ -265,9 +302,7 @@
             exec ${haskellPackages.haskell-language-server}/bin/haskell-language-server-wrapper "$@"
           '';
           preCommitCheck = mkPreCommitCheck system;
-        in
-        {
-          default = pkgs.mkShellNoCC {
+          haskellShell = pkgs.mkShellNoCC {
             CABAL_CONFIG = cabalConfig;
             packages = [
               ghc
@@ -283,7 +318,24 @@
             ++ preCommitCheck.enabledPackages;
             shellHook = preCommitCheck.shellHook;
           };
+          cudaPackages = mkCudaPackages system;
+          cudaShell = haskellShell.overrideAttrs (old: {
+            nativeBuildInputs = old.nativeBuildInputs ++ [ cudaPackages.cuda_nvcc ];
+            # Prefer the pinned CCCL and provide headers/libraries to plain nvcc calls.
+            NVCC_PREPEND_FLAGS = builtins.concatStringsSep " " [
+              "-I${cudaPackages.cccl}/include"
+              "-I${cudaPackages.cuda_cudart}/include"
+              "-I${cudaPackages.cuda_crt}/include"
+              "-L${cudaPackages.cuda_cudart}/lib"
+            ];
+          });
+        in
+        {
+          # Existing `use flake` selects CUDA on Linux without requiring a GPU.
+          default = if pkgs.stdenv.hostPlatform.isLinux then cudaShell else haskellShell;
+          haskell = haskellShell;
         }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux { cuda = cudaShell; }
       );
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt);
