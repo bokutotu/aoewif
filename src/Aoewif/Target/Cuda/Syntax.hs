@@ -96,6 +96,7 @@ data Expr
     = Var Name
     | IntLit Integer
     | FloatLit Float
+    | BoolLit Bool
     | ThreadIdx ThreadIdx
     | BlockIdx BlockIdx
     | BlockDim BlockDim

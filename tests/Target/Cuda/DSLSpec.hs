@@ -90,6 +90,19 @@ spec =
                     ]
             generated `shouldBe` expected
 
+        it "renders boolean literals" $ do
+            let generated =
+                    fmap
+                        Codegen.renderExpr
+                        [ bool True
+                        , bool False
+                        ]
+                expected =
+                    [ "true"
+                    , "false"
+                    ]
+            generated `shouldBe` expected
+
         it "renders arithmetic, comparisons, and bitwise and logical operators with Haskell fixities" $ do
             let generated =
                     fmap

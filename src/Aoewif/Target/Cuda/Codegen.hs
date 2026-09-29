@@ -176,6 +176,8 @@ renderExpr expr =
             show value
         Syntax.FloatLit value ->
             renderFloatLit value
+        Syntax.BoolLit value ->
+            renderBoolLit value
         Syntax.ThreadIdx index ->
             renderThreadIdx index
         Syntax.BlockIdx index ->
@@ -257,6 +259,10 @@ renderFloatLit value
     | isInfinite value && value > 0 = "INFINITY"
     | isInfinite value = "-INFINITY"
     | otherwise = show value ++ "f"
+
+renderBoolLit :: Bool -> String
+renderBoolLit True  = "true"
+renderBoolLit False = "false"
 
 renderThreadIdx :: Syntax.ThreadIdx -> String
 renderThreadIdx Syntax.ThreadIdxX = "threadIdx.x"

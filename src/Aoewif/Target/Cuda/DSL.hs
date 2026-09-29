@@ -6,6 +6,7 @@ module Aoewif.Target.Cuda.DSL (
     KernelBuilder,
     Type (..),
     body,
+    bool,
     bitcast,
     blockDimX,
     blockDimY,
@@ -147,6 +148,9 @@ int = IntLit
 
 float :: Float -> Expr
 float = FloatLit
+
+bool :: Bool -> Expr
+bool = BoolLit
 
 cast :: Type -> Expr -> Expr
 cast targetType = Unary (StaticCast targetType)
