@@ -16,34 +16,11 @@ ghc-options:
 
 library:
   source-dirs: src
-  dependencies:
-    - string-interpolate
   exposed-modules:
-    - Aoewif.Target.Cuda.Sm80
-    - Aoewif.Target.Cuda.Sm80.DSL
-    - Aoewif.Target.Cuda.Sm80.Instruction
-    - Aoewif.Target.Cuda.Sm80.Render
-    - Aoewif.Target.Cuda.Sm90
-    - Aoewif.Target.Cuda.Sm90.DSL
-    - Aoewif.Target.Cuda.Sm90.Instruction
-    - Aoewif.Target.Cuda.Sm90.Render
     - Aoewif.Target.Cuda.Codegen
     - Aoewif.Target.Cuda.DSL
     - Aoewif.Target.Cuda.Syntax
-    - Aoewif.Target.Cuda.Tcgen05.DSL
-    - Aoewif.Target.Cuda.Tcgen05.Instruction
-    - Aoewif.Target.Cuda.Tcgen05.Render
     - Aoewif.Target.Cuda.TensorCoreOp
-  other-modules:
-    - Aoewif.Target.Cuda.Sm90.Asm
-    - Aoewif.Target.Cuda.Sm90.Cluster.Instruction
-    - Aoewif.Target.Cuda.Sm90.Cluster.Render
-    - Aoewif.Target.Cuda.Sm90.MBarrier.Instruction
-    - Aoewif.Target.Cuda.Sm90.MBarrier.Render
-    - Aoewif.Target.Cuda.Sm90.Tma.Instruction
-    - Aoewif.Target.Cuda.Sm90.Tma.Render
-    - Aoewif.Target.Cuda.Sm90.Wgmma.Instruction
-    - Aoewif.Target.Cuda.Sm90.Wgmma.Render
 
 tests:
   aoewif-test:
