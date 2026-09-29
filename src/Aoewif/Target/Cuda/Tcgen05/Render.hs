@@ -17,5 +17,8 @@ instance RenderOp Tcgen05Op where
             Tcgen05FenceAfterThreadSync ->
                 [i|#{padding}cuda::ptx::tcgen05_fence_after_thread_sync();
 |]
+            Tcgen05Mma accumulator descriptorA descriptorB instructionDescriptor disableOutputLane enableInputD ->
+                [i|#{padding}cuda::ptx::tcgen05_mma(cuda::ptx::kind_f16, cuda::ptx::cta_group_1, #{renderExpr accumulator}, #{renderExpr descriptorA}, #{renderExpr descriptorB}, #{renderExpr instructionDescriptor}, #{renderExpr disableOutputLane}, #{renderExpr enableInputD});
+|]
       where
         padding = indent indentation

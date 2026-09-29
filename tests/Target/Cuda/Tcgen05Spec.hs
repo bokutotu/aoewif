@@ -77,18 +77,18 @@ spec =
                                             shiftL (cast USize (int 8)) (int 16)
                                                 .|. shiftL (cast USize (int 16)) (int 32)
                                                 .|. shiftL (cast USize (int 1)) (int 46)
-                                    _ <- define USize "descA" (cast USize (shiftR (addrA .&. int 0x3ffff) (int 4)) .|. descBits)
-                                    _ <- define USize "descB" (cast USize (shiftR (addrB .&. int 0x3ffff) (int 4)) .|. descBits)
-                                    _ <-
+                                    descA <- define USize "descA" (cast USize (shiftR (addrA .&. int 0x3ffff) (int 4)) .|. descBits)
+                                    descB <- define USize "descB" (cast USize (shiftR (addrB .&. int 0x3ffff) (int 4)) .|. descBits)
+                                    idesc <-
                                         define U32 "idesc" $
                                             shiftL (int 8) (int 24)
                                                 .|. shiftL (int 4) (int 17)
                                                 .|. shiftL (int 1) (int 10)
                                                 .|. shiftL (int 1) (int 7)
                                                 .|. shiftL (int 1) (int 4)
-                                    _ <- zeroArray U32 "disableOutputLane" [int 4]
-                                    -- TODO: tcgen05_mma and tcgen05_commit are not modeled yet.
-                                    pure ()
+                                    disableOutputLane <- zeroArray U32 "disableOutputLane" [int 4]
+                                    -- TODO: tcgen05_commit is not modeled yet.
+                                    tcgen05Mma base descA descB idesc disableOutputLane (bool False)
                                 ready <- define Bool "ready" (int 0)
                                 for_ Nothing (not_ ready) Nothing $
                                     mBarrierTryWaitParity ready (MBarrier (done ! int 0)) (int 0) Nothing
@@ -150,6 +150,7 @@ spec =
                         , "        size_t descB = (static_cast<size_t>(((addrB & 262143) >> 4)) | descBits);"
                         , "        uint32_t idesc = (((((8 << 24) | (4 << 17)) | (1 << 10)) | (1 << 7)) | (1 << 4));"
                         , "        uint32_t disableOutputLane[4] = {};"
+                        , "        cuda::ptx::tcgen05_mma(cuda::ptx::kind_f16, cuda::ptx::cta_group_1, base, descA, descB, idesc, disableOutputLane, false);"
                         , "    }"
                         , "    bool ready = 0;"
                         , "    for (; (!ready); ) {"
