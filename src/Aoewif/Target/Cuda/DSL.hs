@@ -65,7 +65,18 @@ module Aoewif.Target.Cuda.DSL (
 )
 where
 
-import           Aoewif.Target.Cuda.Syntax
+import           Aoewif.Target.Cuda.Alignment (Alignment (..))
+import           Aoewif.Target.Cuda.BlockDim  (BlockDim (..))
+import           Aoewif.Target.Cuda.BlockIdx  (BlockIdx (..))
+import           Aoewif.Target.Cuda.Expr      (BinaryOp (..), Expr (..),
+                                               UnaryOp (..))
+import           Aoewif.Target.Cuda.GridDim   (GridDim (..))
+import           Aoewif.Target.Cuda.Kernel    (Kernel (..))
+import           Aoewif.Target.Cuda.Name      (Name (..))
+import           Aoewif.Target.Cuda.Parameter (Parameter (..))
+import           Aoewif.Target.Cuda.Stmt      (Stmt (..))
+import           Aoewif.Target.Cuda.ThreadIdx (ThreadIdx (..))
+import           Aoewif.Target.Cuda.Type      (Type (..))
 
 newtype KernelBuilder value = KernelBuilder ([Parameter], value)
     deriving newtype (Functor, Applicative, Monad)

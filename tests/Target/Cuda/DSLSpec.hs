@@ -2,6 +2,7 @@ module Target.Cuda.DSLSpec (spec) where
 
 import qualified Aoewif.Target.Cuda.Codegen as Codegen
 import           Aoewif.Target.Cuda.DSL
+import           Aoewif.Target.Cuda.Render  (Render (render))
 import           Test.Hspec                 (Spec, describe, it, shouldBe)
 
 spec :: Spec
@@ -43,7 +44,7 @@ spec =
         it "renders thread indices, block indices, and launch dimensions" $ do
             let generated =
                     fmap
-                        Codegen.renderExpr
+                        render
                         [ threadIdxX
                         , threadIdxY
                         , threadIdxZ
@@ -76,7 +77,7 @@ spec =
         it "renders floating-point literals, casts, and composed bitcasts" $ do
             let generated =
                     fmap
-                        Codegen.renderExpr
+                        render
                         [ float 1.25
                         , cast USize blockDimX
                         , bitcast F32 (var "bits")
@@ -93,7 +94,7 @@ spec =
         it "renders boolean literals" $ do
             let generated =
                     fmap
-                        Codegen.renderExpr
+                        render
                         [ bool True
                         , bool False
                         ]
@@ -106,7 +107,7 @@ spec =
         it "renders arithmetic, comparisons, and bitwise and logical operators with Haskell fixities" $ do
             let generated =
                     fmap
-                        Codegen.renderExpr
+                        render
                         [ var "lhs" ./ var "rhs"
                         , var "lhs" .% var "rhs"
                         , var "lhs" .- var "rhs"

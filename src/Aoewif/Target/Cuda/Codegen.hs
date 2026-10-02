@@ -3,289 +3,33 @@ module Aoewif.Target.Cuda.Codegen (
     Include (..),
     generate,
     generateWith,
-    indent,
-    renderExpr,
 )
 where
 
-import qualified Aoewif.Target.Cuda.Syntax       as Syntax
-import           Aoewif.Target.Cuda.TensorCoreOp (RenderOp (renderOp))
-import           Data.List                       (intercalate)
+import           Aoewif.Target.Cuda.Kernel (Kernel)
+import           Aoewif.Target.Cuda.Render (Render (..))
 
 data Include
     = CudaFp16Header
     | CudaBf16Header
     deriving stock (Eq, Show)
 
+instance Render Include where
+    render CudaFp16Header = "#include <cuda_fp16.h>"
+    render CudaBf16Header = "#include <cuda_bf16.h>"
+
 newtype Config = Config
     { includes :: [Include]
     }
     deriving stock (Eq, Show)
 
-generate :: Syntax.Kernel -> String
+generate :: Kernel -> String
 generate = generateWith (Config [])
 
-generateWith :: Config -> Syntax.Kernel -> String
-generateWith config (Syntax.Kernel name parameters body) =
-    renderIncludes (includes config)
-        ++ "extern \"C\" __global__ void "
-        ++ renderName name
-        ++ "("
-        ++ intercalate ", " (map renderParameter parameters)
-        ++ ") {\n"
-        ++ renderStmts 1 body
-        ++ "}\n"
+generateWith :: Config -> Kernel -> String
+generateWith config kernel =
+    renderIncludes (includes config) ++ render kernel
 
 renderIncludes :: [Include] -> String
 renderIncludes configuredIncludes =
-    unlines (["#include <stdint.h>", "#include <cuda/ptx>"] ++ map renderInclude configuredIncludes) ++ "\n"
-
-renderInclude :: Include -> String
-renderInclude CudaFp16Header = "#include <cuda_fp16.h>"
-renderInclude CudaBf16Header = "#include <cuda_bf16.h>"
-
-renderParameter :: Syntax.Parameter -> String
-renderParameter (Syntax.Parameter parameterType name) =
-    renderType parameterType ++ " " ++ renderName name
-
-renderType :: Syntax.Type -> String
-renderType Syntax.Bool                  = "bool"
-renderType Syntax.U32                   = "uint32_t"
-renderType Syntax.USize                 = "size_t"
-renderType Syntax.F16                   = "__half"
-renderType Syntax.BF16                  = "__nv_bfloat16"
-renderType Syntax.F32                   = "float"
-renderType (Syntax.Const valueType)     = renderType valueType ++ " const"
-renderType (Syntax.Pointer pointeeType) = renderType pointeeType ++ "*"
-
-renderAlignment :: Syntax.Alignment -> String
-renderAlignment Syntax.NaturalAlignment = ""
-renderAlignment Syntax.Align16          = "__align__(16) "
-renderAlignment Syntax.Align128         = "__align__(128) "
-
-renderStmts :: Int -> [Syntax.Stmt] -> String
-renderStmts indentation = concatMap (renderStmt indentation)
-
-renderStmt :: Int -> Syntax.Stmt -> String
-renderStmt indentation stmt =
-    case stmt of
-        Syntax.VarDecl variableType name initializer ->
-            indent indentation
-                ++ renderType variableType
-                ++ " "
-                ++ renderName name
-                ++ renderInitializer initializer
-                ++ ";\n"
-        Syntax.Array elementType name extents ->
-            indent indentation
-                ++ renderType elementType
-                ++ " "
-                ++ renderName name
-                ++ concatMap (\extent -> "[" ++ renderExpr extent ++ "]") extents
-                ++ " = {};\n"
-        Syntax.SharedDecl alignment elementType name extent ->
-            indent indentation
-                ++ "__shared__ "
-                ++ renderAlignment alignment
-                ++ renderType elementType
-                ++ " "
-                ++ renderName name
-                ++ "["
-                ++ renderExpr extent
-                ++ "];\n"
-        Syntax.SyncThreads ->
-            indent indentation ++ "__syncthreads();\n"
-        Syntax.NamedBarrierSync barrierId threadCount ->
-            renderNamedBarrier indentation "sync" barrierId threadCount
-        Syntax.NamedBarrierArrive barrierId threadCount ->
-            renderNamedBarrier indentation "arrive" barrierId threadCount
-        Syntax.ExprStmt expr ->
-            indent indentation
-                ++ renderExpr expr
-                ++ ";\n"
-        Syntax.If condition body alternative ->
-            indent indentation
-                ++ "if ("
-                ++ renderExpr condition
-                ++ ") {\n"
-                ++ renderStmts (indentation + 1) body
-                ++ renderAlternative indentation alternative
-        Syntax.For initializer condition update body ->
-            indent indentation
-                ++ "for ("
-                ++ renderForInit initializer
-                ++ "; "
-                ++ renderExpr condition
-                ++ "; "
-                ++ renderForUpdate update
-                ++ ") {\n"
-                ++ renderStmts (indentation + 1) body
-                ++ indent indentation
-                ++ "}\n"
-        Syntax.Op op ->
-            renderOp indentation op
-
-renderNamedBarrier :: Int -> String -> Syntax.Expr -> Syntax.Expr -> String
-renderNamedBarrier indentation operation barrierId threadCount =
-    indent indentation
-        ++ "asm volatile(\"barrier."
-        ++ operation
-        ++ " %0, %1;\" :: \"r\"("
-        ++ renderExpr barrierId
-        ++ "), \"r\"("
-        ++ renderExpr threadCount
-        ++ ") : \"memory\");\n"
-
-renderInitializer :: Maybe Syntax.Expr -> String
-renderInitializer Nothing = ""
-renderInitializer (Just expr) =
-    " = " ++ renderExpr expr
-
-renderAlternative :: Int -> Maybe [Syntax.Stmt] -> String
-renderAlternative indentation Nothing =
-    indent indentation ++ "}\n"
-renderAlternative indentation (Just body) =
-    indent indentation
-        ++ "} else {\n"
-        ++ renderStmts (indentation + 1) body
-        ++ indent indentation
-        ++ "}\n"
-
-renderForInit :: Maybe Syntax.Stmt -> String
-renderForInit =
-    maybe "" renderForInitStmt
-
-renderForInitStmt :: Syntax.Stmt -> String
-renderForInitStmt (Syntax.VarDecl variableType name initializer) =
-    renderType variableType ++ " " ++ renderName name ++ renderInitializer initializer
-renderForInitStmt (Syntax.ExprStmt expr) =
-    renderExpr expr
-renderForInitStmt statement =
-    renderStmt 0 statement
-
-renderForUpdate :: Maybe Syntax.Expr -> String
-renderForUpdate Nothing     = ""
-renderForUpdate (Just expr) = renderExpr expr
-
-renderExpr :: Syntax.Expr -> String
-renderExpr expr =
-    case expr of
-        Syntax.Var name ->
-            renderName name
-        Syntax.IntLit value ->
-            show value
-        Syntax.FloatLit value ->
-            renderFloatLit value
-        Syntax.BoolLit value ->
-            renderBoolLit value
-        Syntax.ThreadIdx index ->
-            renderThreadIdx index
-        Syntax.BlockIdx index ->
-            renderBlockIdx index
-        Syntax.BlockDim dimension ->
-            renderBlockDim dimension
-        Syntax.GridDim dimension ->
-            renderGridDim dimension
-        Syntax.Unary (Syntax.StaticCast targetType) operand ->
-            "static_cast<"
-                ++ renderType targetType
-                ++ ">("
-                ++ renderExpr operand
-                ++ ")"
-        Syntax.Unary (Syntax.ReinterpretCast targetType) operand ->
-            "(*reinterpret_cast<"
-                ++ renderType targetType
-                ++ "*>(&"
-                ++ renderExpr operand
-                ++ "))"
-        Syntax.Unary Syntax.LogicalNot operand ->
-            "(!"
-                ++ renderExpr operand
-                ++ ")"
-        Syntax.Unary Syntax.BitComplement operand ->
-            "(~"
-                ++ renderExpr operand
-                ++ ")"
-        Syntax.Binary operator lhs rhs ->
-            "("
-                ++ renderExpr lhs
-                ++ " "
-                ++ renderBinaryOp operator
-                ++ " "
-                ++ renderExpr rhs
-                ++ ")"
-        Syntax.Conditional condition consequent alternative ->
-            "("
-                ++ renderExpr condition
-                ++ " ? "
-                ++ renderExpr consequent
-                ++ " : "
-                ++ renderExpr alternative
-                ++ ")"
-        Syntax.Subscript value index ->
-            renderExpr value
-                ++ "["
-                ++ renderExpr index
-                ++ "]"
-        Syntax.Call function arguments ->
-            renderExpr function
-                ++ "("
-                ++ intercalate ", " (map renderExpr arguments)
-                ++ ")"
-
-renderBinaryOp :: Syntax.BinaryOp -> String
-renderBinaryOp Syntax.Assign             = "="
-renderBinaryOp Syntax.Add                = "+"
-renderBinaryOp Syntax.Subtract           = "-"
-renderBinaryOp Syntax.Multiply           = "*"
-renderBinaryOp Syntax.Divide             = "/"
-renderBinaryOp Syntax.Modulo             = "%"
-renderBinaryOp Syntax.Equal              = "=="
-renderBinaryOp Syntax.NotEqual           = "!="
-renderBinaryOp Syntax.LessThan           = "<"
-renderBinaryOp Syntax.LessThanOrEqual    = "<="
-renderBinaryOp Syntax.GreaterThanOrEqual = ">="
-renderBinaryOp Syntax.LogicalAnd         = "&&"
-renderBinaryOp Syntax.LogicalOr          = "||"
-renderBinaryOp Syntax.ShiftLeft          = "<<"
-renderBinaryOp Syntax.ShiftRight         = ">>"
-renderBinaryOp Syntax.BitAnd             = "&"
-renderBinaryOp Syntax.BitXor             = "^"
-renderBinaryOp Syntax.BitOr              = "|"
-
-renderFloatLit :: Float -> String
-renderFloatLit value
-    | isNaN value = "NAN"
-    | isInfinite value && value > 0 = "INFINITY"
-    | isInfinite value = "-INFINITY"
-    | otherwise = show value ++ "f"
-
-renderBoolLit :: Bool -> String
-renderBoolLit True  = "true"
-renderBoolLit False = "false"
-
-renderThreadIdx :: Syntax.ThreadIdx -> String
-renderThreadIdx Syntax.ThreadIdxX = "threadIdx.x"
-renderThreadIdx Syntax.ThreadIdxY = "threadIdx.y"
-renderThreadIdx Syntax.ThreadIdxZ = "threadIdx.z"
-
-renderBlockIdx :: Syntax.BlockIdx -> String
-renderBlockIdx Syntax.BlockIdxX = "blockIdx.x"
-renderBlockIdx Syntax.BlockIdxY = "blockIdx.y"
-renderBlockIdx Syntax.BlockIdxZ = "blockIdx.z"
-
-renderBlockDim :: Syntax.BlockDim -> String
-renderBlockDim Syntax.BlockDimX = "blockDim.x"
-renderBlockDim Syntax.BlockDimY = "blockDim.y"
-renderBlockDim Syntax.BlockDimZ = "blockDim.z"
-
-renderGridDim :: Syntax.GridDim -> String
-renderGridDim Syntax.GridDimX = "gridDim.x"
-renderGridDim Syntax.GridDimY = "gridDim.y"
-renderGridDim Syntax.GridDimZ = "gridDim.z"
-
-renderName :: Syntax.Name -> String
-renderName (Syntax.Name name) = name
-
-indent :: Int -> String
-indent level = replicate (level * 4) ' '
+    unlines (["#include <stdint.h>", "#include <cuda/ptx>"] ++ map render configuredIncludes) ++ "\n"
