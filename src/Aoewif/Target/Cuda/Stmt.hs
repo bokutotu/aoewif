@@ -14,8 +14,6 @@ data Stmt
     | Array Type Name [Expr]
     | SharedDecl Alignment Type Name Expr
     | SyncThreads
-    | NamedBarrierSync Expr Expr
-    | NamedBarrierArrive Expr Expr
     | ExprStmt Expr
     | If Expr [Stmt] (Maybe [Stmt])
     | For (Maybe Stmt) Expr (Maybe Expr) [Stmt]
@@ -47,10 +45,6 @@ instance Render Stmt where
                     ++ "];\n"
             SyncThreads ->
                 "__syncthreads();\n"
-            NamedBarrierSync barrierId threadCount ->
-                renderNamedBarrier "sync" barrierId threadCount
-            NamedBarrierArrive barrierId threadCount ->
-                renderNamedBarrier "arrive" barrierId threadCount
             ExprStmt expr ->
                 render expr ++ ";\n"
             If condition body alternative ->
@@ -69,16 +63,6 @@ instance Render Stmt where
                     ++ ") {\n"
                     ++ indent (concatMap render body)
                     ++ "}\n"
-
-renderNamedBarrier :: String -> Expr -> Expr -> String
-renderNamedBarrier operation barrierId threadCount =
-    "asm volatile(\"barrier."
-        ++ operation
-        ++ " %0, %1;\" :: \"r\"("
-        ++ render barrierId
-        ++ "), \"r\"("
-        ++ render threadCount
-        ++ ") : \"memory\");\n"
 
 renderInitializer :: Maybe Expr -> String
 renderInitializer Nothing     = ""

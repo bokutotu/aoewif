@@ -27,15 +27,13 @@ spec =
                                 (Just (Binary Assign index (Binary Add index (IntLit 1))))
                                 [ If
                                     (Binary Equal index (IntLit 0))
-                                    [ SyncThreads
-                                    , NamedBarrierSync (IntLit 1) (IntLit 32)
-                                    ]
+                                    [SyncThreads]
                                     ( Just
                                         [ For
                                             Nothing
                                             (BoolLit False)
                                             Nothing
-                                            [NamedBarrierArrive (IntLit 2) (IntLit 32)]
+                                            [SyncThreads]
                                         ]
                                     )
                                 , ExprStmt (Binary Assign (Subscript output index) (FloatLit 1.25))
@@ -47,10 +45,9 @@ spec =
                         , "    for (uint32_t index = 0; (index < 4); (index = (index + 1))) {"
                         , "        if ((index == 0)) {"
                         , "            __syncthreads();"
-                        , "            asm volatile(\"barrier.sync %0, %1;\" :: \"r\"(1), \"r\"(32) : \"memory\");"
                         , "        } else {"
                         , "            for (; false; ) {"
-                        , "                asm volatile(\"barrier.arrive %0, %1;\" :: \"r\"(2), \"r\"(32) : \"memory\");"
+                        , "                __syncthreads();"
                         , "            }"
                         , "        }"
                         , "        (output[index] = 1.25f);"
