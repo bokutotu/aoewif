@@ -1,18 +1,18 @@
 module Aoewif.Target.Cuda.Expr (
+    Axis (..),
     BinaryOp (..),
     Expr (..),
     UnaryOp (..),
 )
 where
 
-import           Aoewif.Target.Cuda.BlockDim  (BlockDim)
-import           Aoewif.Target.Cuda.BlockIdx  (BlockIdx)
-import           Aoewif.Target.Cuda.GridDim   (GridDim)
-import           Aoewif.Target.Cuda.Name      (Name)
-import           Aoewif.Target.Cuda.Render    (Render (..))
-import           Aoewif.Target.Cuda.ThreadIdx (ThreadIdx)
-import           Aoewif.Target.Cuda.Type      (Type)
-import           Data.List                    (intercalate)
+import           Aoewif.Target.Cuda.Name   (Name)
+import           Aoewif.Target.Cuda.Render (Render (..))
+import           Aoewif.Target.Cuda.Type   (Type)
+import           Data.List                 (intercalate)
+
+data Axis = X | Y | Z
+    deriving stock (Eq, Show)
 
 data UnaryOp
     = StaticCast Type
@@ -47,16 +47,21 @@ data Expr
     | IntLit Integer
     | FloatLit Float
     | BoolLit Bool
-    | ThreadIdx ThreadIdx
-    | BlockIdx BlockIdx
-    | BlockDim BlockDim
-    | GridDim GridDim
+    | ThreadIdx Axis
+    | BlockIdx Axis
+    | BlockDim Axis
+    | GridDim Axis
     | Unary UnaryOp Expr
     | Binary BinaryOp Expr Expr
     | Conditional Expr Expr Expr
     | Subscript Expr Expr
     | Call Expr [Expr]
     deriving stock (Eq, Show)
+
+instance Render Axis where
+    render X = "x"
+    render Y = "y"
+    render Z = "z"
 
 instance Render BinaryOp where
     render Assign             = "="
@@ -89,14 +94,14 @@ instance Render Expr where
                 renderFloatLit value
             BoolLit value ->
                 if value then "true" else "false"
-            ThreadIdx index ->
-                render index
-            BlockIdx index ->
-                render index
-            BlockDim dimension ->
-                render dimension
-            GridDim dimension ->
-                render dimension
+            ThreadIdx axis ->
+                "threadIdx." ++ render axis
+            BlockIdx axis ->
+                "blockIdx." ++ render axis
+            BlockDim axis ->
+                "blockDim." ++ render axis
+            GridDim axis ->
+                "gridDim." ++ render axis
             Unary (StaticCast targetType) operand ->
                 "static_cast<"
                     ++ render targetType

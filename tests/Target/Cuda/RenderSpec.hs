@@ -1,14 +1,11 @@
 module Target.Cuda.RenderSpec (spec) where
 
 import           Aoewif.Target.Cuda.Alignment (Alignment (..))
-import           Aoewif.Target.Cuda.BlockDim  (BlockDim (..))
-import           Aoewif.Target.Cuda.BlockIdx  (BlockIdx (..))
-import           Aoewif.Target.Cuda.Expr      (BinaryOp (..), Expr (..))
-import           Aoewif.Target.Cuda.GridDim   (GridDim (..))
+import           Aoewif.Target.Cuda.Expr      (Axis (..), BinaryOp (..),
+                                               Expr (..))
 import           Aoewif.Target.Cuda.Name      (Name (..))
 import           Aoewif.Target.Cuda.Parameter (Parameter (..))
 import           Aoewif.Target.Cuda.Render    (Render (render), indent)
-import           Aoewif.Target.Cuda.ThreadIdx (ThreadIdx (..))
 import           Aoewif.Target.Cuda.Type      (Type (..))
 import           Test.Hspec                   (Spec, describe, it, shouldBe)
 
@@ -62,12 +59,17 @@ spec =
                 expected = ["", "__align__(16) ", "__align__(128) "]
             generated `shouldBe` expected
 
-        it "renders builtins directly from their defining modules" $ do
+        it "renders axes" $ do
+            let generated = map render [X, Y, Z]
+                expected = ["x", "y", "z"]
+            generated `shouldBe` expected
+
+        it "renders builtin expressions for all axes" $ do
             let generated =
-                    [ map render [ThreadIdxX, ThreadIdxY, ThreadIdxZ]
-                    , map render [BlockIdxX, BlockIdxY, BlockIdxZ]
-                    , map render [BlockDimX, BlockDimY, BlockDimZ]
-                    , map render [GridDimX, GridDimY, GridDimZ]
+                    [ map render [ThreadIdx X, ThreadIdx Y, ThreadIdx Z]
+                    , map render [BlockIdx X, BlockIdx Y, BlockIdx Z]
+                    , map render [BlockDim X, BlockDim Y, BlockDim Z]
+                    , map render [GridDim X, GridDim Y, GridDim Z]
                     ]
                 expected =
                     [ ["threadIdx.x", "threadIdx.y", "threadIdx.z"]

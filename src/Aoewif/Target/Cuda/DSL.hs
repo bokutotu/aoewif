@@ -64,16 +64,12 @@ module Aoewif.Target.Cuda.DSL (
 where
 
 import           Aoewif.Target.Cuda.Alignment (Alignment (..))
-import           Aoewif.Target.Cuda.BlockDim  (BlockDim (..))
-import           Aoewif.Target.Cuda.BlockIdx  (BlockIdx (..))
-import           Aoewif.Target.Cuda.Expr      (BinaryOp (..), Expr (..),
-                                               UnaryOp (..))
-import           Aoewif.Target.Cuda.GridDim   (GridDim (..))
+import           Aoewif.Target.Cuda.Expr      (Axis (..), BinaryOp (..),
+                                               Expr (..), UnaryOp (..))
 import           Aoewif.Target.Cuda.Kernel    (Kernel (..))
 import           Aoewif.Target.Cuda.Name      (Name (..))
 import           Aoewif.Target.Cuda.Parameter (Parameter (..))
 import           Aoewif.Target.Cuda.Stmt      (Stmt (..))
-import           Aoewif.Target.Cuda.ThreadIdx (ThreadIdx (..))
 import           Aoewif.Target.Cuda.Type      (Type (..))
 
 newtype KernelBuilder value = KernelBuilder ([Parameter], value)
@@ -196,24 +192,24 @@ syncThreads :: Block ()
 syncThreads = emit SyncThreads
 
 threadIdxX, threadIdxY, threadIdxZ :: Expr
-threadIdxX = ThreadIdx ThreadIdxX
-threadIdxY = ThreadIdx ThreadIdxY
-threadIdxZ = ThreadIdx ThreadIdxZ
+threadIdxX = ThreadIdx X
+threadIdxY = ThreadIdx Y
+threadIdxZ = ThreadIdx Z
 
 blockIdxX, blockIdxY, blockIdxZ :: Expr
-blockIdxX = BlockIdx BlockIdxX
-blockIdxY = BlockIdx BlockIdxY
-blockIdxZ = BlockIdx BlockIdxZ
+blockIdxX = BlockIdx X
+blockIdxY = BlockIdx Y
+blockIdxZ = BlockIdx Z
 
 blockDimX, blockDimY, blockDimZ :: Expr
-blockDimX = BlockDim BlockDimX
-blockDimY = BlockDim BlockDimY
-blockDimZ = BlockDim BlockDimZ
+blockDimX = BlockDim X
+blockDimY = BlockDim Y
+blockDimZ = BlockDim Z
 
 gridDimX, gridDimY, gridDimZ :: Expr
-gridDimX = GridDim GridDimX
-gridDimY = GridDim GridDimY
-gridDimZ = GridDim GridDimZ
+gridDimX = GridDim X
+gridDimY = GridDim Y
+gridDimZ = GridDim Z
 
 infixl 9 !
 
