@@ -1,10 +1,17 @@
 module Aoewif.Target.Cuda.DSL (
     Alignment (..),
+    AsmInput,
+    AsmOutput,
     Block,
     Expr,
     Kernel,
     KernelBuilder,
+    Mma,
+    MmaOperation,
+    Operand,
+    RegisterConstraint (..),
     Type (..),
+    accumulateInto,
     body,
     bool,
     bitcast,
@@ -22,6 +29,8 @@ module Aoewif.Target.Cuda.DSL (
     define,
     emit,
     expr_,
+    f16,
+    f32,
     float,
     for_,
     gridDimX,
@@ -31,9 +40,14 @@ module Aoewif.Target.Cuda.DSL (
     ifElse_,
     if_,
     int,
+    input,
     kernel,
+    m16n8k16,
+    mma,
+    multiplyAddInto,
     not_,
     parameter,
+    readWrite,
     shared,
     shiftL,
     shiftR,
@@ -42,6 +56,7 @@ module Aoewif.Target.Cuda.DSL (
     threadIdxY,
     threadIdxZ,
     var,
+    writeOnly,
     xor,
     zeroArray,
     (!),
@@ -63,14 +78,19 @@ module Aoewif.Target.Cuda.DSL (
 )
 where
 
-import           Aoewif.Target.Cuda.Alignment (Alignment (..))
-import           Aoewif.Target.Cuda.Expr      (Axis (..), BinaryOp (..),
-                                               Expr (..), UnaryOp (..))
-import           Aoewif.Target.Cuda.Kernel    (Kernel (..))
-import           Aoewif.Target.Cuda.Name      (Name (..))
-import           Aoewif.Target.Cuda.Parameter (Parameter (..))
-import           Aoewif.Target.Cuda.Stmt      (Stmt (..))
-import           Aoewif.Target.Cuda.Type      (Type (..))
+import           Aoewif.Target.Cuda.Alignment  (Alignment (..))
+import           Aoewif.Target.Cuda.AsmOperand (AsmInput, AsmOutput,
+                                                RegisterConstraint (..), input,
+                                                readWrite, writeOnly)
+import           Aoewif.Target.Cuda.Expr       (Axis (..), BinaryOp (..),
+                                                Expr (..), UnaryOp (..))
+import           Aoewif.Target.Cuda.Kernel     (Kernel (..))
+import           Aoewif.Target.Cuda.Mma        (Mma (..), MmaOperation (..),
+                                                Operand (..))
+import           Aoewif.Target.Cuda.Name       (Name (..))
+import           Aoewif.Target.Cuda.Parameter  (Parameter (..))
+import           Aoewif.Target.Cuda.Stmt       (Stmt (..))
+import           Aoewif.Target.Cuda.Type       (Type (..))
 
 newtype KernelBuilder value = KernelBuilder ([Parameter], value)
     deriving newtype (Functor, Applicative, Monad)
@@ -187,6 +207,24 @@ call = Call
 call_ :: Expr -> [Expr] -> Block ()
 call_ function arguments =
     expr_ (call function arguments)
+
+mma :: (MmaOperation -> Mma) -> MmaOperation -> Block ()
+mma shape = expr_ . MmaExpr . shape
+
+m16n8k16 :: MmaOperation -> Mma
+m16n8k16 = M16N8K16
+
+accumulateInto :: Operand AsmOutput -> Operand AsmInput -> Operand AsmInput -> MmaOperation
+accumulateInto = CABC
+
+multiplyAddInto :: Operand AsmOutput -> Operand AsmInput -> Operand AsmInput -> Operand AsmInput -> MmaOperation
+multiplyAddInto = DABC
+
+f16 :: [parameter] -> Operand parameter
+f16 = Operand F16
+
+f32 :: [parameter] -> Operand parameter
+f32 = Operand F32
 
 syncThreads :: Block ()
 syncThreads = emit SyncThreads

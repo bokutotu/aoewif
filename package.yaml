@@ -9,6 +9,9 @@ github: bokutotu/aoewif
 dependencies:
   - base >= 4.22 && < 4.23
 
+extra-source-files:
+  - reference_kernel/ampere_mma.cu
+
 language: GHC2024
 ghc-options:
   - -Wall
@@ -21,7 +24,9 @@ library:
     - Aoewif.Target.Cuda.Codegen
     - Aoewif.Target.Cuda.DSL
     - Aoewif.Target.Cuda.Expr
+    - Aoewif.Target.Cuda.AsmOperand
     - Aoewif.Target.Cuda.Kernel
+    - Aoewif.Target.Cuda.Mma
     - Aoewif.Target.Cuda.Name
     - Aoewif.Target.Cuda.Parameter
     - Aoewif.Target.Cuda.Render

@@ -6,6 +6,7 @@ module Aoewif.Target.Cuda.Expr (
 )
 where
 
+import           Aoewif.Target.Cuda.Mma    (Mma)
 import           Aoewif.Target.Cuda.Name   (Name)
 import           Aoewif.Target.Cuda.Render (Render (..))
 import           Aoewif.Target.Cuda.Type   (Type)
@@ -56,6 +57,7 @@ data Expr
     | Conditional Expr Expr Expr
     | Subscript Expr Expr
     | Call Expr [Expr]
+    | MmaExpr Mma
     deriving stock (Eq, Show)
 
 instance Render Axis where
@@ -103,51 +105,23 @@ instance Render Expr where
             GridDim axis ->
                 "gridDim." ++ render axis
             Unary (StaticCast targetType) operand ->
-                "static_cast<"
-                    ++ render targetType
-                    ++ ">("
-                    ++ render operand
-                    ++ ")"
+                "static_cast<" ++ render targetType ++ ">(" ++ render operand ++ ")"
             Unary (ReinterpretCast targetType) operand ->
-                "(*reinterpret_cast<"
-                    ++ render targetType
-                    ++ "*>(&"
-                    ++ render operand
-                    ++ "))"
+                "(*reinterpret_cast<" ++ render targetType ++ "*>(&" ++ render operand ++ "))"
             Unary LogicalNot operand ->
-                "(!"
-                    ++ render operand
-                    ++ ")"
+                "(!" ++ render operand ++ ")"
             Unary BitComplement operand ->
-                "(~"
-                    ++ render operand
-                    ++ ")"
+                "(~" ++ render operand ++ ")"
             Binary operator lhs rhs ->
-                "("
-                    ++ render lhs
-                    ++ " "
-                    ++ render operator
-                    ++ " "
-                    ++ render rhs
-                    ++ ")"
+                "(" ++ render lhs ++ " " ++ render operator ++ " " ++ render rhs ++ ")"
             Conditional condition consequent alternative ->
-                "("
-                    ++ render condition
-                    ++ " ? "
-                    ++ render consequent
-                    ++ " : "
-                    ++ render alternative
-                    ++ ")"
+                "(" ++ render condition ++ " ? " ++ render consequent ++ " : " ++ render alternative ++ ")"
             Subscript value index ->
-                render value
-                    ++ "["
-                    ++ render index
-                    ++ "]"
+                render value ++ "[" ++ render index ++ "]"
             Call function arguments ->
-                render function
-                    ++ "("
-                    ++ intercalate ", " (map render arguments)
-                    ++ ")"
+                render function ++ "(" ++ intercalate ", " (map render arguments) ++ ")"
+            MmaExpr instruction ->
+                render instruction
 
 renderFloatLit :: Float -> String
 renderFloatLit value
