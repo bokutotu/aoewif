@@ -155,15 +155,18 @@ ifElse_ condition consequent alternative =
             (Just (blockStatements alternative))
         )
 
-for_ :: Maybe Stmt -> Expr -> Maybe Expr -> Block () -> Block ()
-for_ initializer condition update loopBody =
+for_ :: Type -> String -> Expr -> (Expr -> Expr) -> (Expr -> Expr) -> (Expr -> Block ()) -> Block ()
+for_ variableType text initializer step condition loopBody =
     emit
         ( For
-            initializer
-            condition
-            update
-            (blockStatements loopBody)
+            (Just (VarDecl variableType name (Just initializer)))
+            (condition index)
+            (Just (Binary Assign index (step index)))
+            (blockStatements (loopBody index))
         )
+  where
+    name = Name text
+    index = Var name
 
 var :: String -> Expr
 var = Var . Name
