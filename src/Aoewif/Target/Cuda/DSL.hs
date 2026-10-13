@@ -49,15 +49,12 @@ module Aoewif.Target.Cuda.DSL (
     parameter,
     readWrite,
     shared,
-    shiftL,
-    shiftR,
     syncThreads,
     threadIdxX,
     threadIdxY,
     threadIdxZ,
     var,
     writeOnly,
-    xor,
     zeroArray,
     (!),
     (.*),
@@ -74,7 +71,10 @@ module Aoewif.Target.Cuda.DSL (
     (.&&),
     (.||),
     (.&.),
+    (.^),
     (.|.),
+    (.<<),
+    (.>>),
 )
 where
 
@@ -192,15 +192,6 @@ not_ = Unary LogicalNot
 complement :: Expr -> Expr
 complement = Unary BitComplement
 
-shiftL :: Expr -> Expr -> Expr
-shiftL = Binary ShiftLeft
-
-shiftR :: Expr -> Expr -> Expr
-shiftR = Binary ShiftRight
-
-xor :: Expr -> Expr -> Expr
-xor = Binary BitXor
-
 ifElse :: Expr -> Expr -> Expr -> Expr
 ifElse = Conditional
 
@@ -257,6 +248,14 @@ infixl 9 !
 (!) :: Expr -> Expr -> Expr
 (!) = Subscript
 
+infixl 8 .<<, .>>
+
+(.<<) :: Expr -> Expr -> Expr
+(.<<) = Binary ShiftLeft
+
+(.>>) :: Expr -> Expr -> Expr
+(.>>) = Binary ShiftRight
+
 infixl 7 .*
 
 (.*) :: Expr -> Expr -> Expr
@@ -303,6 +302,11 @@ infixl 7 .&.
 
 (.&.) :: Expr -> Expr -> Expr
 (.&.) = Binary BitAnd
+
+infixl 6 .^
+
+(.^) :: Expr -> Expr -> Expr
+(.^) = Binary BitXor
 
 infixl 5 .|.
 

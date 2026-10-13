@@ -33,9 +33,8 @@ spec = describe "reference kernels" $ do
                                         fragmentA
                                             ! packedIndex
                                             .= ( cast U32 (halfAsUshort (matrixA ! (row .* int 16 .+ column)))
-                                                    .|. shiftL
-                                                        (cast U32 (halfAsUshort (matrixA ! (row .* int 16 .+ column .+ int 1))))
-                                                        (int 16)
+                                                    .|. cast U32 (halfAsUshort (matrixA ! (row .* int 16 .+ column .+ int 1)))
+                                                    .<< int 16
                                                )
                                     fragmentB <- zeroArray U32 [int 2]
                                     fragmentD <- zeroArray F32 [int 4]
@@ -45,9 +44,8 @@ spec = describe "reference kernels" $ do
                                         fragmentB
                                             ! packedIndex
                                             .= ( cast U32 (halfAsUshort (matrixB ! (row .* int 8 .+ column)))
-                                                    .|. shiftL
-                                                        (cast U32 (halfAsUshort (matrixB ! ((row .+ int 1) .* int 8 .+ column))))
-                                                        (int 16)
+                                                    .|. cast U32 (halfAsUshort (matrixB ! ((row .+ int 1) .* int 8 .+ column)))
+                                                    .<< int 16
                                                )
                                     mma m16n8k16 $
                                         accumulateInto

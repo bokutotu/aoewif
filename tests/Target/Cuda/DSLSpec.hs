@@ -129,7 +129,9 @@ spec =
                         , var "lhs" .|| var "rhs"
                         , not_ (var "condition")
                         , complement (var "value")
-                        , shiftL (var "value") (var "amount")
+                        , var "value" .<< var "amount"
+                        , var "value" .>> var "amount"
+                        , var "lhs" .^ var "rhs"
                         , var "lhs" .|. var "rhs"
                         , ifElse (var "condition") (var "trueValue") (var "falseValue")
                         , var "first" .|. var "second" .&. var "third"
@@ -149,11 +151,36 @@ spec =
                     , "(!condition)"
                     , "(~value)"
                     , "(value << amount)"
+                    , "(value >> amount)"
+                    , "(lhs ^ rhs)"
                     , "(lhs | rhs)"
                     , "(condition ? trueValue : falseValue)"
                     , "(first | (second & third))"
                     , "(((lhs == rhs) && (value != 0)) || fallback)"
                     , "(lhs - ((rhs / 2) % 3))"
+                    ]
+            generated `shouldBe` expected
+
+        it "uses left-associative shifts and xor with Haskell fixities" $ do
+            let generated =
+                    fmap
+                        render
+                        [ var "a" .<< var "b" .<< var "c"
+                        , var "a" .>> var "b" .>> var "c"
+                        , var "a" .<< var "b" .>> var "c"
+                        , var "a" .^ var "b" .^ var "c"
+                        , var "a" .* var "b" .<< var "c"
+                        , var "a" .>> var "b" .* var "c"
+                        , var "a" .|. var "b" .^ var "c" .&. var "d"
+                        ]
+                expected =
+                    [ "((a << b) << c)"
+                    , "((a >> b) >> c)"
+                    , "((a << b) >> c)"
+                    , "((a ^ b) ^ c)"
+                    , "(a * (b << c))"
+                    , "((a >> b) * c)"
+                    , "(a | (b ^ (c & d)))"
                     ]
             generated `shouldBe` expected
 
