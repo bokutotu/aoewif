@@ -1,25 +1,35 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Target.Cuda.DSLSpec (spec) where
 
 import qualified Aoewif.Target.Cuda.Codegen as Codegen
 import           Aoewif.Target.Cuda.DSL
 import           Aoewif.Target.Cuda.Render  (Render (render))
+import           Aoewif.Target.Cuda.TH      (cuda)
 import           Test.Hspec                 (Spec, describe, it, shouldBe)
 
 spec :: Spec
 spec =
     describe "CUDA DSL" $ do
         it "renders zero-initialized multidimensional private arrays and aligned shared declarations" $ do
-            let generated = Codegen.generate $ kernel "array_declarations" $ body $ do
-                    _ <- shared NaturalAlignment U32 "natural" (int 4)
-                    _ <- shared Align16 U32 "aligned16" (int 8)
-                    _ <- shared Align128 U32 "aligned128" (int 32)
-                    values <- zeroArray U32 "values" [int 4]
-                    tile <- zeroArray F32 "tile" [int 2, int 3 .+ int 1]
-                    values ! int 2 .= int 7
-                    tile ! int 1 ! int 3 .= float 1.25
-                    if_ (threadIdxX .== int 0) $ do
-                        scratch <- zeroArray U32 "scratch" [int 2, int 3, int 4, int 5]
-                        scratch ! int 1 ! int 2 ! int 3 ! int 4 .= values ! int 2
+            let generated =
+                    Codegen.generate
+                        $( cuda
+                            [|
+                                kernel "array_declarations" $ body $ do
+                                    natural <- shared NaturalAlignment U32 (int 4)
+                                    aligned16 <- shared Align16 U32 (int 8)
+                                    aligned128 <- shared Align128 U32 (int 32)
+                                    let _ = (natural, aligned16, aligned128)
+                                    values <- zeroArray U32 [int 4]
+                                    tile <- zeroArray F32 [int 2, int 3 .+ int 1]
+                                    values ! int 2 .= int 7
+                                    tile ! int 1 ! int 3 .= float 1.25
+                                    if_ (threadIdxX .== int 0) $ do
+                                        scratch <- zeroArray U32 [int 2, int 3, int 4, int 5]
+                                        scratch ! int 1 ! int 2 ! int 3 ! int 4 .= values ! int 2
+                                |]
+                         )
                 expected =
                     unlines
                         [ "#include <stdint.h>"
@@ -148,10 +158,16 @@ spec =
             generated `shouldBe` expected
 
         it "renders calls as expressions and statements" $ do
-            let generated = Codegen.generate $ kernel "calls" $ body $ do
-                    value <- define F32 "value" (call (var "sqrtf") [float 4])
-                    call_ (var "consume") [value, int 2]
-                    call_ (var "finish") []
+            let generated =
+                    Codegen.generate
+                        $( cuda
+                            [|
+                                kernel "calls" $ body $ do
+                                    value <- define F32 (call (var "sqrtf") [float 4])
+                                    call_ (var "consume") [value, int 2]
+                                    call_ (var "finish") []
+                                |]
+                         )
                 expected =
                     unlines
                         [ "#include <stdint.h>"

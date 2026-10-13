@@ -19,6 +19,8 @@ ghc-options:
 
 library:
   source-dirs: src
+  dependencies:
+    - template-haskell
   exposed-modules:
     - Aoewif.Target.Cuda.Alignment
     - Aoewif.Target.Cuda.Codegen
@@ -32,6 +34,7 @@ library:
     - Aoewif.Target.Cuda.Render
     - Aoewif.Target.Cuda.Stmt
     - Aoewif.Target.Cuda.Type
+    - Aoewif.Target.Cuda.TH
 
 tests:
   aoewif-test:
