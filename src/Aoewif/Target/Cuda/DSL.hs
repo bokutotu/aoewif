@@ -6,6 +6,10 @@ module Aoewif.Target.Cuda.DSL (
     Expr,
     Kernel,
     KernelBuilder,
+    LdMatrix,
+    LdMatrixSpace (..),
+    MatrixCount (..),
+    MatrixLayout (..),
     Mma,
     MmaOperation,
     Operand,
@@ -42,6 +46,8 @@ module Aoewif.Target.Cuda.DSL (
     int,
     input,
     kernel,
+    ldmatrix,
+    m8n8b16,
     m16n8k16,
     mma,
     multiplyAddInto,
@@ -85,6 +91,10 @@ import           Aoewif.Target.Cuda.AsmOperand (AsmInput, AsmOutput,
 import           Aoewif.Target.Cuda.Expr       (Axis (..), BinaryOp (..),
                                                 Expr (..), UnaryOp (..))
 import           Aoewif.Target.Cuda.Kernel     (Kernel (..))
+import           Aoewif.Target.Cuda.LdMatrix   (LdMatrix (..),
+                                                LdMatrixSpace (..),
+                                                MatrixCount (..),
+                                                MatrixLayout (..))
 import           Aoewif.Target.Cuda.Mma        (Mma (..), MmaOperation (..),
                                                 Operand (..))
 import           Aoewif.Target.Cuda.Name       (Name (..))
@@ -201,6 +211,12 @@ call = Call
 call_ :: Expr -> [Expr] -> Block ()
 call_ function arguments =
     expr_ (call function arguments)
+
+m8n8b16 :: MatrixCount -> MatrixLayout -> LdMatrixSpace -> [AsmOutput] -> AsmInput -> LdMatrix
+m8n8b16 = M8N8B16
+
+ldmatrix :: LdMatrix -> Block ()
+ldmatrix = expr_ . LdMatrixExpr
 
 mma :: (MmaOperation -> Mma) -> MmaOperation -> Block ()
 mma shape = expr_ . MmaExpr . shape

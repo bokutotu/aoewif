@@ -29,6 +29,7 @@ library:
     - Aoewif.Target.Cuda.External
     - Aoewif.Target.Cuda.AsmOperand
     - Aoewif.Target.Cuda.Kernel
+    - Aoewif.Target.Cuda.LdMatrix
     - Aoewif.Target.Cuda.Mma
     - Aoewif.Target.Cuda.Name
     - Aoewif.Target.Cuda.Parameter

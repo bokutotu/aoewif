@@ -6,11 +6,12 @@ module Aoewif.Target.Cuda.Expr (
 )
 where
 
-import           Aoewif.Target.Cuda.Mma    (Mma)
-import           Aoewif.Target.Cuda.Name   (Name)
-import           Aoewif.Target.Cuda.Render (Render (..))
-import           Aoewif.Target.Cuda.Type   (Type)
-import           Data.List                 (intercalate)
+import           Aoewif.Target.Cuda.LdMatrix (LdMatrix)
+import           Aoewif.Target.Cuda.Mma      (Mma)
+import           Aoewif.Target.Cuda.Name     (Name)
+import           Aoewif.Target.Cuda.Render   (Render (..))
+import           Aoewif.Target.Cuda.Type     (Type)
+import           Data.List                   (intercalate)
 
 data Axis = X | Y | Z
     deriving stock (Eq, Show)
@@ -58,6 +59,7 @@ data Expr
     | Subscript Expr Expr
     | Call Expr [Expr]
     | MmaExpr Mma
+    | LdMatrixExpr LdMatrix
     deriving stock (Eq, Show)
 
 instance Render Axis where
@@ -121,6 +123,8 @@ instance Render Expr where
             Call function arguments ->
                 render function ++ "(" ++ intercalate ", " (map render arguments) ++ ")"
             MmaExpr instruction ->
+                render instruction
+            LdMatrixExpr instruction ->
                 render instruction
 
 renderFloatLit :: Float -> String

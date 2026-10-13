@@ -2,30 +2,53 @@
 #include <cuda/ptx>
 #include <cuda_fp16.h>
 
-extern "C" __global__ void ampere_mma(__half const* matrixA, __half const* matrixB, float* matrixD) {
-    uint32_t const groupId = (threadIdx.x / 4);
-    uint32_t const threadInGroup = (threadIdx.x % 4);
-    uint32_t fragmentA[4] = {};
-    for (uint32_t packedIndex = 0; (packedIndex < 4); (packedIndex = (packedIndex + 1))) {
-        uint32_t const row = (groupId + ((packedIndex % 2) * 8));
-        uint32_t const column = ((threadInGroup * 2) + ((packedIndex / 2) * 8));
-        (fragmentA[packedIndex] = (static_cast<uint32_t>(__half_as_ushort(matrixA[((row * 16) + column)])) | (static_cast<uint32_t>(__half_as_ushort(matrixA[(((row * 16) + column) + 1)])) << 16)));
-    }
-    uint32_t fragmentB[2] = {};
+extern "C" __global__ void ampere_mma(__half const* matrixA, __half const* matrixB, float* matrixD, uint32_t M, uint32_t N, uint32_t K) {
+    uint32_t const lane = threadIdx.x;
+    uint32_t const groupId = (lane / 4);
+    uint32_t const threadInGroup = (lane % 4);
+    uint32_t const tileRow = (blockIdx.y * 16);
+    uint32_t const tileColumn = (blockIdx.x * 8);
+    __shared__ __align__(16) __half sharedA[(16 * 16)];
+    __shared__ __align__(16) __half sharedB[(16 * 8)];
     float fragmentD[4] = {};
-    for (uint32_t packedIndex = 0; (packedIndex < 2); (packedIndex = (packedIndex + 1))) {
-        uint32_t const row = ((threadInGroup * 2) + (packedIndex * 8));
-        uint32_t const column = groupId;
-        (fragmentB[packedIndex] = (static_cast<uint32_t>(__half_as_ushort(matrixB[((row * 8) + column)])) | (static_cast<uint32_t>(__half_as_ushort(matrixB[(((row + 1) * 8) + column)])) << 16)));
+    uint32_t const addressA = static_cast<uint32_t>(__cvta_generic_to_shared((sharedA + (((lane % 16) * 16) + ((lane / 16) * 8)))));
+    uint32_t const addressB = static_cast<uint32_t>(__cvta_generic_to_shared((sharedB + ((lane % 16) * 8))));
+    for (uint32_t tileK = 0; (tileK < K); (tileK = (tileK + 16))) {
+        for (uint32_t index = lane; (index < (16 * 16)); (index = (index + 32))) {
+            uint32_t const row = (tileRow + (index / 16));
+            uint32_t const column = (tileK + (index % 16));
+            (sharedA[index] = matrixA[((static_cast<size_t>(row) * K) + column)]);
+        }
+        for (uint32_t index = lane; (index < (16 * 8)); (index = (index + 32))) {
+            uint32_t const row = (tileK + (index / 8));
+            uint32_t const column = (tileColumn + (index % 8));
+            (sharedB[index] = matrixB[((static_cast<size_t>(row) * N) + column)]);
+        }
+        __syncthreads();
+        uint32_t fragmentA[4] = {};
+        uint32_t fragmentB[2] = {};
+        asm volatile(
+            "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%4];\n"
+            : "=r"(fragmentA[0]), "=r"(fragmentA[1]), "=r"(fragmentA[2]), "=r"(fragmentA[3])
+            : "r"(addressA)
+            : "memory"
+        );
+        asm volatile(
+            "ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0, %1}, [%2];\n"
+            : "=r"(fragmentB[0]), "=r"(fragmentB[1])
+            : "r"(addressB)
+            : "memory"
+        );
+        asm volatile(
+            "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%0, %1, %2, %3};\n"
+            : "+f"(fragmentD[0]), "+f"(fragmentD[1]), "+f"(fragmentD[2]), "+f"(fragmentD[3])
+            : "r"(fragmentA[0]), "r"(fragmentA[1]), "r"(fragmentA[2]), "r"(fragmentA[3]), "r"(fragmentB[0]), "r"(fragmentB[1])
+        );
+        __syncthreads();
     }
-    asm volatile(
-        "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%0, %1, %2, %3};\n"
-        : "+f"(fragmentD[0]), "+f"(fragmentD[1]), "+f"(fragmentD[2]), "+f"(fragmentD[3])
-        : "r"(fragmentA[0]), "r"(fragmentA[1]), "r"(fragmentA[2]), "r"(fragmentA[3]), "r"(fragmentB[0]), "r"(fragmentB[1])
-    );
     for (uint32_t element = 0; (element < 4); (element = (element + 1))) {
-        uint32_t const row = (groupId + ((element / 2) * 8));
-        uint32_t const column = ((threadInGroup * 2) + (element % 2));
-        (matrixD[((row * 8) + column)] = fragmentD[element]);
+        uint32_t const row = ((tileRow + groupId) + ((element / 2) * 8));
+        uint32_t const column = ((tileColumn + (threadInGroup * 2)) + (element % 2));
+        (matrixD[((static_cast<size_t>(row) * N) + column)] = fragmentD[element]);
     }
 }
