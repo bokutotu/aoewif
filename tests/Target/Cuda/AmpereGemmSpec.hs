@@ -2,10 +2,14 @@
 
 module Target.Cuda.AmpereGemmSpec (spec) where
 
-import qualified Aoewif.Target.Cuda.Codegen as Codegen
+import qualified Aoewif.Target.Cuda.Codegen  as Codegen
 import           Aoewif.Target.Cuda.DSL
-import           Aoewif.Target.Cuda.TH      (cuda)
-import           Test.Hspec                 (Spec, describe, it, shouldBe)
+import           Aoewif.Target.Cuda.External (external)
+import           Aoewif.Target.Cuda.TH       (cuda)
+import           Test.Hspec                  (Spec, describe, it, shouldBe)
+
+halfAsUshort :: Expr -> Expr
+halfAsUshort = external "__half_as_ushort"
 
 spec :: Spec
 spec = describe "reference kernels" $ do
@@ -28,9 +32,9 @@ spec = describe "reference kernels" $ do
                                         column <- define (Const U32) (threadInGroup .* int 2 .+ (packedIndex ./ int 2) .* int 8)
                                         fragmentA
                                             ! packedIndex
-                                            .= ( cast U32 (call (var "__half_as_ushort") [matrixA ! (row .* int 16 .+ column)])
+                                            .= ( cast U32 (halfAsUshort (matrixA ! (row .* int 16 .+ column)))
                                                     .|. shiftL
-                                                        (cast U32 (call (var "__half_as_ushort") [matrixA ! (row .* int 16 .+ column .+ int 1)]))
+                                                        (cast U32 (halfAsUshort (matrixA ! (row .* int 16 .+ column .+ int 1))))
                                                         (int 16)
                                                )
                                     fragmentB <- zeroArray U32 [int 2]
@@ -40,9 +44,9 @@ spec = describe "reference kernels" $ do
                                         column <- define (Const U32) groupId
                                         fragmentB
                                             ! packedIndex
-                                            .= ( cast U32 (call (var "__half_as_ushort") [matrixB ! (row .* int 8 .+ column)])
+                                            .= ( cast U32 (halfAsUshort (matrixB ! (row .* int 8 .+ column)))
                                                     .|. shiftL
-                                                        (cast U32 (call (var "__half_as_ushort") [matrixB ! ((row .+ int 1) .* int 8 .+ column)]))
+                                                        (cast U32 (halfAsUshort (matrixB ! ((row .+ int 1) .* int 8 .+ column))))
                                                         (int 16)
                                                )
                                     mma m16n8k16 $
