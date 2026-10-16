@@ -114,21 +114,37 @@ instance Render Expr where
             GridDim axis ->
                 "gridDim." ++ render axis
             Unary (StaticCast targetType) operand ->
-                "static_cast<" ++ render targetType ++ ">(" ++ render operand ++ ")"
+                let typeText = render targetType
+                    operandText = render operand
+                 in [template|static_cast<${typeText}>(${operandText})|]
             Unary (ReinterpretCast targetType) operand ->
-                "(*reinterpret_cast<" ++ render targetType ++ "*>(&" ++ render operand ++ "))"
+                let typeText = render targetType
+                    operandText = render operand
+                 in [template|(*reinterpret_cast<${typeText}*>(&${operandText}))|]
             Unary LogicalNot operand ->
-                "(!" ++ render operand ++ ")"
+                let operandText = render operand
+                 in [template|(!${operandText})|]
             Unary BitComplement operand ->
-                "(~" ++ render operand ++ ")"
+                let operandText = render operand
+                 in [template|(~${operandText})|]
             Binary operator lhs rhs ->
-                "(" ++ render lhs ++ " " ++ render operator ++ " " ++ render rhs ++ ")"
+                let lhsText = render lhs
+                    operatorText = render operator
+                    rhsText = render rhs
+                 in [template|(${lhsText} ${operatorText} ${rhsText})|]
             Conditional condition consequent alternative ->
-                "(" ++ render condition ++ " ? " ++ render consequent ++ " : " ++ render alternative ++ ")"
+                let conditionText = render condition
+                    consequentText = render consequent
+                    alternativeText = render alternative
+                 in [template|(${conditionText} ? ${consequentText} : ${alternativeText})|]
             Subscript value index ->
-                render value ++ "[" ++ render index ++ "]"
+                let valueText = render value
+                    indexText = render index
+                 in [template|${valueText}[${indexText}]|]
             Call function arguments ->
-                render function ++ "(" ++ intercalate ", " (map render arguments) ++ ")"
+                let functionText = render function
+                    argumentsText = intercalate ", " (map render arguments)
+                 in [template|${functionText}(${argumentsText})|]
             MmaExpr instruction ->
                 render instruction
             LdMatrixExpr instruction ->

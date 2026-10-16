@@ -1,3 +1,5 @@
+{-# LANGUAGE QuasiQuotes #-}
+
 module Aoewif.Target.Cuda.Stmt (
     Stmt (..),
 )
@@ -6,8 +8,9 @@ where
 import           Aoewif.Target.Cuda.Alignment (Alignment)
 import           Aoewif.Target.Cuda.Expr      (Expr)
 import           Aoewif.Target.Cuda.Name      (Name)
-import           Aoewif.Target.Cuda.Render    (Render (..), indent)
+import           Aoewif.Target.Cuda.Render    (Render (..))
 import           Aoewif.Target.Cuda.Type      (Type)
+import           Aoewif.Target.Template       (template)
 
 data Stmt
     = VarDecl Type Name (Maybe Expr)
@@ -24,48 +27,49 @@ instance Render Stmt where
     render stmt =
         case stmt of
             VarDecl variableType name initializer ->
-                render variableType
-                    ++ " "
-                    ++ render name
-                    ++ renderInitializer initializer
-                    ++ ";\n"
+                let typeText = render variableType
+                    nameText = render name
+                    initializerText = renderInitializer initializer
+                 in [template|${typeText} ${nameText}${initializerText};|] ++ "\n"
             Array elementType name extents ->
-                render elementType
-                    ++ " "
-                    ++ render name
-                    ++ concatMap (\extent -> "[" ++ render extent ++ "]") extents
-                    ++ " = {};\n"
+                let typeText = render elementType
+                    nameText = render name
+                    extentsText = concatMap (\extent -> let extentText = render extent in [template|[${extentText}]|]) extents
+                 in [template|${typeText} ${nameText}${extentsText} = {};|] ++ "\n"
             SharedDecl alignment elementType name extent ->
-                "__shared__ "
-                    ++ render alignment
-                    ++ render elementType
-                    ++ " "
-                    ++ render name
-                    ++ "["
-                    ++ render extent
-                    ++ "];\n"
+                let alignmentText = render alignment
+                    typeText = render elementType
+                    nameText = render name
+                    extentText = render extent
+                 in [template|__shared__ ${alignmentText}${typeText} ${nameText}[${extentText}];|] ++ "\n"
             SyncThreads ->
                 "__syncthreads();\n"
             SyncWarp ->
                 "__syncwarp();\n"
             ExprStmt expr ->
-                render expr ++ ";\n"
+                let expressionText = render expr
+                 in [template|${expressionText};|] ++ "\n"
             If condition body alternative ->
-                "if ("
-                    ++ render condition
-                    ++ ") {\n"
-                    ++ indent (concatMap render body)
-                    ++ renderAlternative alternative
+                let conditionText = render condition
+                    bodyText = concatMap render body
+                    alternativeText = renderAlternative alternative
+                 in [template|
+                    if (${conditionText}) {
+                        ${bodyText}
+                    ${alternativeText}
+                    |]
+                        ++ "\n"
             For initializer condition update body ->
-                "for ("
-                    ++ maybe "" renderForInitStmt initializer
-                    ++ "; "
-                    ++ render condition
-                    ++ "; "
-                    ++ maybe "" render update
-                    ++ ") {\n"
-                    ++ indent (concatMap render body)
-                    ++ "}\n"
+                let initializerText = maybe "" renderForInitStmt initializer
+                    conditionText = render condition
+                    updateText = maybe "" render update
+                    bodyText = concatMap render body
+                 in [template|
+                    for (${initializerText}; ${conditionText}; ${updateText}) {
+                        ${bodyText}
+                    }
+                    |]
+                        ++ "\n"
 
 renderInitializer :: Maybe Expr -> String
 renderInitializer Nothing     = ""
@@ -74,12 +78,21 @@ renderInitializer (Just expr) = " = " ++ render expr
 renderAlternative :: Maybe [Stmt] -> String
 renderAlternative Nothing = "}\n"
 renderAlternative (Just body) =
-    "} else {\n"
-        ++ indent (concatMap render body)
-        ++ "}\n"
+    [template|
+    } else {
+        ${bodyText}
+    }
+    |]
+        ++ "\n"
+  where
+    bodyText = concatMap render body
 
 renderForInitStmt :: Stmt -> String
 renderForInitStmt (VarDecl variableType name initializer) =
-    render variableType ++ " " ++ render name ++ renderInitializer initializer
+    [template|${typeText} ${nameText}${initializerText}|]
+  where
+    typeText = render variableType
+    nameText = render name
+    initializerText = renderInitializer initializer
 renderForInitStmt (ExprStmt expr) = render expr
 renderForInitStmt statement = render statement

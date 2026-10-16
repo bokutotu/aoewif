@@ -1,3 +1,5 @@
+{-# LANGUAGE QuasiQuotes #-}
+
 module Aoewif.Target.Cuda.LdMatrix (
     LdMatrix (..),
     LdMatrixSpace (..),
@@ -7,7 +9,8 @@ module Aoewif.Target.Cuda.LdMatrix (
 where
 
 import           Aoewif.Target.Cuda.AsmOperand (AsmInput, AsmOutput)
-import           Aoewif.Target.Cuda.Render     (Render (..), indent)
+import           Aoewif.Target.Cuda.Render     (Render (..))
+import           Aoewif.Target.Template        (template)
 import           Data.List                     (intercalate)
 
 data MatrixCount = X1 | X2 | X4
@@ -44,28 +47,20 @@ instance Render LdMatrixSpace where
 
 instance Render LdMatrix where
     render (M8N8B16 count matrixLayout space outputs address) =
-        "asm volatile(\n"
-            ++ indent
-                ( show instruction
-                    ++ "\n"
-                    ++ ": "
-                    ++ intercalate ", " (map render outputs)
-                    ++ "\n"
-                    ++ ": "
-                    ++ render address
-                    ++ "\n"
-                    ++ ": \"memory\"\n"
-                )
-            ++ ")"
+        [template|
+        asm volatile(
+            "ldmatrix.sync.aligned.m8n8${countText}${layoutText}${spaceText}.b16 {${registersText}}, [${addressRegister}];\n"
+            : ${outputsText}
+            : ${addressText}
+            : "memory"
+        )
+        |]
       where
         register index = "%" ++ show index
-        instruction =
-            "ldmatrix.sync.aligned.m8n8"
-                ++ render count
-                ++ render matrixLayout
-                ++ render space
-                ++ ".b16 {"
-                ++ intercalate ", " (map register [0 .. length outputs - 1])
-                ++ "}, ["
-                ++ register (length outputs)
-                ++ "];\n"
+        outputsText = intercalate ", " (map render outputs)
+        addressText = render address
+        countText = render count
+        layoutText = render matrixLayout
+        spaceText = render space
+        registersText = intercalate ", " (map register [0 .. length outputs - 1])
+        addressRegister = register (length outputs)

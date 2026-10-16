@@ -1,3 +1,5 @@
+{-# LANGUAGE QuasiQuotes #-}
+
 module Aoewif.Target.Cuda.AsmOperand (
     AsmInput (..),
     AsmOutput (..),
@@ -11,6 +13,7 @@ where
 
 import {-# SOURCE #-}           Aoewif.Target.Cuda.Expr   (Expr)
 import                          Aoewif.Target.Cuda.Render (Render (..))
+import                          Aoewif.Target.Template    (template)
 
 data RegisterConstraint
     = RegU16
@@ -60,8 +63,14 @@ instance Render OutputMode where
 
 instance Render AsmOutput where
     render (AsmOutput mode constraint value) =
-        show (render mode ++ render constraint) ++ "(" ++ render value ++ ")"
+        [template|${constraintText}(${valueText})|]
+      where
+        constraintText = show (render mode ++ render constraint)
+        valueText = render value
 
 instance Render AsmInput where
     render (AsmInput constraint value) =
-        show (render constraint) ++ "(" ++ render value ++ ")"
+        [template|${constraintText}(${valueText})|]
+      where
+        constraintText = show (render constraint)
+        valueText = render value
