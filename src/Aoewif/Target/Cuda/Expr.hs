@@ -1,3 +1,5 @@
+{-# LANGUAGE QuasiQuotes #-}
+
 module Aoewif.Target.Cuda.Expr (
     Axis (..),
     BinaryOp (..),
@@ -6,11 +8,13 @@ module Aoewif.Target.Cuda.Expr (
 )
 where
 
+import           Aoewif.Target.Cuda.CpAsync  (CpAsync)
 import           Aoewif.Target.Cuda.LdMatrix (LdMatrix)
 import           Aoewif.Target.Cuda.Mma      (Mma)
 import           Aoewif.Target.Cuda.Name     (Name)
 import           Aoewif.Target.Cuda.Render   (Render (..))
 import           Aoewif.Target.Cuda.Type     (Type)
+import           Aoewif.Target.Template      (template)
 import           Data.List                   (intercalate)
 
 data Axis = X | Y | Z
@@ -60,6 +64,9 @@ data Expr
     | Call Expr [Expr]
     | MmaExpr Mma
     | LdMatrixExpr LdMatrix
+    | CpAsyncExpr CpAsync
+    | CpAsyncCommitGroup
+    | CpAsyncWaitGroup Integer
     deriving stock (Eq, Show)
 
 instance Render Axis where
@@ -126,6 +133,18 @@ instance Render Expr where
                 render instruction
             LdMatrixExpr instruction ->
                 render instruction
+            CpAsyncExpr instruction ->
+                render instruction
+            CpAsyncCommitGroup ->
+                "asm volatile(\"cp.async.commit_group;\\n\" ::: \"memory\")"
+            CpAsyncWaitGroup groups ->
+                let groupCount = show groups
+                 in [template|
+                    asm volatile(
+                        "cp.async.wait_group ${groupCount};\n"
+                        ::: "memory"
+                    )
+                    |]
 
 renderFloatLit :: Float -> String
 renderFloatLit value

@@ -3,6 +3,10 @@ module Aoewif.Target.Cuda.DSL (
     AsmInput,
     AsmOutput,
     Block,
+    CpAsync (..),
+    CpAsyncCopy (..),
+    CpAsyncSource (..),
+    L2PrefetchSize (..),
     Expr,
     Kernel,
     KernelBuilder,
@@ -25,6 +29,13 @@ module Aoewif.Target.Cuda.DSL (
     blockIdxX,
     blockIdxY,
     blockIdxZ,
+    ca4,
+    ca8,
+    ca16,
+    cg16,
+    cpAsync,
+    cpAsyncCommitGroup,
+    cpAsyncWaitGroup,
     call,
     call_,
     cast,
@@ -56,6 +67,7 @@ module Aoewif.Target.Cuda.DSL (
     readWrite,
     shared,
     syncThreads,
+    syncWarp,
     threadIdxX,
     threadIdxY,
     threadIdxZ,
@@ -88,6 +100,9 @@ import           Aoewif.Target.Cuda.Alignment  (Alignment (..))
 import           Aoewif.Target.Cuda.AsmOperand (AsmInput, AsmOutput,
                                                 RegisterConstraint (..), input,
                                                 readWrite, writeOnly)
+import           Aoewif.Target.Cuda.CpAsync    (CpAsync (..), CpAsyncCopy (..),
+                                                CpAsyncSource (..),
+                                                L2PrefetchSize (..))
 import           Aoewif.Target.Cuda.Expr       (Axis (..), BinaryOp (..),
                                                 Expr (..), UnaryOp (..))
 import           Aoewif.Target.Cuda.Kernel     (Kernel (..))
@@ -218,6 +233,21 @@ m8n8b16 = M8N8B16
 ldmatrix :: LdMatrix -> Block ()
 ldmatrix = expr_ . LdMatrixExpr
 
+cg16, ca4, ca8, ca16 :: AsmInput -> AsmInput -> CpAsync
+cg16 dst src = CpAsync Cg16 dst src EntireSource Nothing
+ca4 dst src = CpAsync Ca4 dst src EntireSource Nothing
+ca8 dst src = CpAsync Ca8 dst src EntireSource Nothing
+ca16 dst src = CpAsync Ca16 dst src EntireSource Nothing
+
+cpAsync :: CpAsync -> Block ()
+cpAsync = expr_ . CpAsyncExpr
+
+cpAsyncCommitGroup :: Block ()
+cpAsyncCommitGroup = expr_ CpAsyncCommitGroup
+
+cpAsyncWaitGroup :: Integer -> Block ()
+cpAsyncWaitGroup = expr_ . CpAsyncWaitGroup
+
 mma :: (MmaOperation -> Mma) -> MmaOperation -> Block ()
 mma shape = expr_ . MmaExpr . shape
 
@@ -238,6 +268,9 @@ f32 = Operand F32
 
 syncThreads :: Block ()
 syncThreads = emit SyncThreads
+
+syncWarp :: Block ()
+syncWarp = emit SyncWarp
 
 threadIdxX, threadIdxY, threadIdxZ :: Expr
 threadIdxX = ThreadIdx X

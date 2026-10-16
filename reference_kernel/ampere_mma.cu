@@ -14,17 +14,33 @@ extern "C" __global__ void ampere_mma(__half const* matrixA, __half const* matri
     uint32_t const addressA = static_cast<uint32_t>(__cvta_generic_to_shared((sharedA + (((lane % 16) * 16) + ((lane / 16) * 8)))));
     uint32_t const addressB = static_cast<uint32_t>(__cvta_generic_to_shared((sharedB + ((lane % 16) * 8))));
     for (uint32_t tileK = 0; (tileK < K); (tileK = (tileK + 16))) {
-        for (uint32_t index = lane; (index < (16 * 16)); (index = (index + 32))) {
-            uint32_t const row = (tileRow + (index / 16));
-            uint32_t const column = (tileK + (index % 16));
-            (sharedA[index] = matrixA[((static_cast<size_t>(row) * K) + column)]);
+        uint32_t const row = (tileRow + (lane / 2));
+        uint32_t const column = (tileK + ((lane % 2) * 8));
+        uint32_t const destination = static_cast<uint32_t>(__cvta_generic_to_shared((sharedA + (lane * 8))));
+        __half const* const source = (matrixA + ((static_cast<size_t>(row) * K) + column));
+        asm volatile(
+            "cp.async.cg.shared.global [%0], [%1], 16;\n"
+            :
+            : "r"(destination), "l"(source)
+            : "memory"
+        );
+        if ((lane < 16)) {
+            uint32_t const rowB = (tileK + lane);
+            uint32_t const destinationB = static_cast<uint32_t>(__cvta_generic_to_shared((sharedB + (lane * 8))));
+            __half const* const sourceB = (matrixB + ((static_cast<size_t>(rowB) * N) + tileColumn));
+            asm volatile(
+                "cp.async.cg.shared.global [%0], [%1], 16;\n"
+                :
+                : "r"(destinationB), "l"(sourceB)
+                : "memory"
+            );
         }
-        for (uint32_t index = lane; (index < (16 * 8)); (index = (index + 32))) {
-            uint32_t const row = (tileK + (index / 8));
-            uint32_t const column = (tileColumn + (index % 8));
-            (sharedB[index] = matrixB[((static_cast<size_t>(row) * N) + column)]);
-        }
-        __syncthreads();
+        asm volatile("cp.async.commit_group;\n" ::: "memory");
+        asm volatile(
+            "cp.async.wait_group 0;\n"
+            ::: "memory"
+        );
+        __syncwarp();
         uint32_t fragmentA[4] = {};
         uint32_t fragmentB[2] = {};
         asm volatile(
@@ -44,7 +60,7 @@ extern "C" __global__ void ampere_mma(__half const* matrixA, __half const* matri
             : "+f"(fragmentD[0]), "+f"(fragmentD[1]), "+f"(fragmentD[2]), "+f"(fragmentD[3])
             : "r"(fragmentA[0]), "r"(fragmentA[1]), "r"(fragmentA[2]), "r"(fragmentA[3]), "r"(fragmentB[0]), "r"(fragmentB[1])
         );
-        __syncthreads();
+        __syncwarp();
     }
     for (uint32_t element = 0; (element < 4); (element = (element + 1))) {
         uint32_t const row = ((tileRow + groupId) + ((element / 2) * 8));

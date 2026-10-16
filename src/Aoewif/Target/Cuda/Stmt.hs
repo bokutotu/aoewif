@@ -14,6 +14,7 @@ data Stmt
     | Array Type Name [Expr]
     | SharedDecl Alignment Type Name Expr
     | SyncThreads
+    | SyncWarp
     | ExprStmt Expr
     | If Expr [Stmt] (Maybe [Stmt])
     | For (Maybe Stmt) Expr (Maybe Expr) [Stmt]
@@ -45,6 +46,8 @@ instance Render Stmt where
                     ++ "];\n"
             SyncThreads ->
                 "__syncthreads();\n"
+            SyncWarp ->
+                "__syncwarp();\n"
             ExprStmt expr ->
                 render expr ++ ";\n"
             If condition body alternative ->

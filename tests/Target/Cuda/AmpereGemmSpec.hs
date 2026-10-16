@@ -50,15 +50,19 @@ spec = describe "reference kernels" $ do
                                             (Const U32)
                                             (cast U32 (genericToShared (sharedB .+ ((lane .% int 16) .* int 8))))
                                     for_ U32 (int 0) (.+ int 16) (.< k) $ \tileK -> do
-                                        for_ U32 lane (.+ int 32) (.< int 16 .* int 16) $ \index -> do
-                                            row <- define (Const U32) (tileRow .+ index ./ int 16)
-                                            column <- define (Const U32) (tileK .+ index .% int 16)
-                                            sharedA ! index .= matrixA ! (cast USize row .* k .+ column)
-                                        for_ U32 lane (.+ int 32) (.< int 16 .* int 8) $ \index -> do
-                                            row <- define (Const U32) (tileK .+ index ./ int 8)
-                                            column <- define (Const U32) (tileColumn .+ index .% int 8)
-                                            sharedB ! index .= matrixB ! (cast USize row .* n .+ column)
-                                        syncThreads
+                                        row <- define (Const U32) (tileRow .+ lane ./ int 2)
+                                        column <- define (Const U32) (tileK .+ (lane .% int 2) .* int 8)
+                                        destination <- define (Const U32) (cast U32 (genericToShared (sharedA .+ lane .* int 8)))
+                                        source <- define (Const (Pointer (Const F16))) (matrixA .+ (cast USize row .* k .+ column))
+                                        cpAsync (cg16 (input RegU32 destination) (input RegU64 source))
+                                        if_ (lane .< int 16) $ do
+                                            rowB <- define (Const U32) (tileK .+ lane)
+                                            destinationB <- define (Const U32) (cast U32 (genericToShared (sharedB .+ lane .* int 8)))
+                                            sourceB <- define (Const (Pointer (Const F16))) (matrixB .+ (cast USize rowB .* n .+ tileColumn))
+                                            cpAsync (cg16 (input RegU32 destinationB) (input RegU64 sourceB))
+                                        cpAsyncCommitGroup
+                                        cpAsyncWaitGroup 0
+                                        syncWarp
                                         fragmentA <- zeroArray U32 [int 4]
                                         fragmentB <- zeroArray U32 [int 2]
                                         ldmatrix $
@@ -103,7 +107,7 @@ spec = describe "reference kernels" $ do
                                                     ]
                                                 )
                                         -- Finish shared-memory reads before storing the next tile.
-                                        syncThreads
+                                        syncWarp
                                     for_ U32 (int 0) (.+ int 1) (.< int 4) $ \element -> do
                                         row <- define (Const U32) (tileRow .+ groupId .+ (element ./ int 2) .* int 8)
                                         column <- define (Const U32) (tileColumn .+ threadInGroup .* int 2 .+ element .% int 2)
