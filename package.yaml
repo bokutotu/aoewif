@@ -27,6 +27,12 @@ library:
     - Aoewif.Target.Cuda.Codegen
     - Aoewif.Target.Cuda.CpAsync
     - Aoewif.Target.Cuda.DSL
+    - Aoewif.Target.Cuda.DSL.Builder
+    - Aoewif.Target.Cuda.DSL.CpAsync
+    - Aoewif.Target.Cuda.DSL.Expr
+    - Aoewif.Target.Cuda.DSL.LdMatrix
+    - Aoewif.Target.Cuda.DSL.Mma
+    - Aoewif.Target.Cuda.DSL.TH
     - Aoewif.Target.Cuda.Expr
     - Aoewif.Target.Cuda.External
     - Aoewif.Target.Cuda.AsmOperand

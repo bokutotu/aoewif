@@ -5,7 +5,6 @@ module Target.Cuda.DSLSpec (spec) where
 import qualified Aoewif.Target.Cuda.Codegen as Codegen
 import           Aoewif.Target.Cuda.DSL
 import           Aoewif.Target.Cuda.Render  (Render (render))
-import           Aoewif.Target.Cuda.TH      (cuda)
 import           Test.Hspec                 (Spec, describe, it, shouldBe)
 
 spec :: Spec

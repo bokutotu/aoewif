@@ -3,7 +3,7 @@
 module Target.Cuda.AmpereGemmSpec (spec) where
 
 import qualified Aoewif.Target.Cuda.Codegen  as Codegen
-import           Aoewif.Target.Cuda.DSL
+import           Aoewif.Target.Cuda.DSL      hiding (cuda)
 import           Aoewif.Target.Cuda.External (external)
 import           Aoewif.Target.Cuda.TH       (cuda)
 import           Test.Hspec                  (Spec, describe, it, shouldBe)
