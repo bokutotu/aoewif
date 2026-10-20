@@ -1,6 +1,5 @@
 # TODO
 
-- shared/global のベクトル load/store
 - `mbarrier`、`cp.async` 完了との連携
 - `#pragma unroll`（回数指定含む）
 - `__restrict__`

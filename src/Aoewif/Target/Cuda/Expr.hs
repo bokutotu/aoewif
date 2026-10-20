@@ -8,14 +8,15 @@ module Aoewif.Target.Cuda.Expr (
 )
 where
 
-import           Aoewif.Target.Cuda.CpAsync  (CpAsync)
-import           Aoewif.Target.Cuda.LdMatrix (LdMatrix)
-import           Aoewif.Target.Cuda.Mma      (Mma)
-import           Aoewif.Target.Cuda.Name     (Name)
-import           Aoewif.Target.Cuda.Render   (Render (..))
-import           Aoewif.Target.Cuda.Type     (Type)
-import           Aoewif.Target.Template      (template)
-import           Data.List                   (intercalate)
+import           Aoewif.Target.Cuda.CpAsync   (CpAsync)
+import           Aoewif.Target.Cuda.LdMatrix  (LdMatrix)
+import           Aoewif.Target.Cuda.LoadStore (VectorLoad, VectorStore)
+import           Aoewif.Target.Cuda.Mma       (Mma)
+import           Aoewif.Target.Cuda.Name      (Name)
+import           Aoewif.Target.Cuda.Render    (Render (..))
+import           Aoewif.Target.Cuda.Type      (Type)
+import           Aoewif.Target.Template       (template)
+import           Data.List                    (intercalate)
 
 data Axis = X | Y | Z
     deriving stock (Eq, Show)
@@ -65,6 +66,8 @@ data Expr
     | MmaExpr Mma
     | LdMatrixExpr LdMatrix
     | CpAsyncExpr CpAsync
+    | VectorLoadExpr VectorLoad
+    | VectorStoreExpr VectorStore
     | CpAsyncCommitGroup
     | CpAsyncWaitGroup Integer
     deriving stock (Eq, Show)
@@ -150,6 +153,10 @@ instance Render Expr where
             LdMatrixExpr instruction ->
                 render instruction
             CpAsyncExpr instruction ->
+                render instruction
+            VectorLoadExpr instruction ->
+                render instruction
+            VectorStoreExpr instruction ->
                 render instruction
             CpAsyncCommitGroup ->
                 "asm volatile(\"cp.async.commit_group;\\n\" ::: \"memory\")"

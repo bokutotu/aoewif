@@ -31,6 +31,7 @@ library:
     - Aoewif.Target.Cuda.DSL.CpAsync
     - Aoewif.Target.Cuda.DSL.Expr
     - Aoewif.Target.Cuda.DSL.LdMatrix
+    - Aoewif.Target.Cuda.DSL.LoadStore
     - Aoewif.Target.Cuda.DSL.Mma
     - Aoewif.Target.Cuda.DSL.TH
     - Aoewif.Target.Cuda.Expr
@@ -38,6 +39,7 @@ library:
     - Aoewif.Target.Cuda.AsmOperand
     - Aoewif.Target.Cuda.Kernel
     - Aoewif.Target.Cuda.LdMatrix
+    - Aoewif.Target.Cuda.LoadStore
     - Aoewif.Target.Cuda.Mma
     - Aoewif.Target.Cuda.Name
     - Aoewif.Target.Cuda.Parameter
